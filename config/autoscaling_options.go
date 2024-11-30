@@ -53,8 +53,6 @@ type GCEOptions struct {
 	MigInstancesMinRefreshWaitTime time.Duration
 	// DomainUrl is the GCE url used to make calls to GCE API.
 	DomainUrl string
-	// LocalSSDDiskSizeProvider provides local ssd disk size based on machine type
-	LocalSSDDiskSizeProvider gce_localssdsize.LocalSSDSizeProvider
 	// BulkMigInstancesListingEnabled means that cluster instances should be listed in bulk instead of per mig.
 	// Instances of migs having instances in creating or deleting state are re-fetched using igm.ListInstances. Inconsistencies are handled by re-fetching using igm.ListInstances
 	BulkMigInstancesListingEnabled bool
@@ -90,9 +88,6 @@ func NewDefaultNodeGroupDifferenceRatios() NodeGroupDifferenceRatios {
 
 // AutoscalingOptions contain various options to customize how autoscaling works
 type AutoscalingOptions struct {
-	// NodeGroupDefaults are default values for per NodeGroup options.
-	// They will be used any time a specific value is not provided for a given NodeGroup.
-	NodeGroupDefaults NodeGroupAutoscalingOptions
 	// MaxEmptyBulkDelete is a number of empty nodes that can be removed at the same time.
 	MaxEmptyBulkDelete int
 	// MaxNodesTotal sets the maximum number of nodes in the whole cluster
@@ -105,14 +100,8 @@ type AutoscalingOptions struct {
 	MaxMemoryTotal int64
 	// MinMemoryTotal sets the maximum memory (in bytes) in the whole cluster
 	MinMemoryTotal int64
-	// GpuTotal is a list of strings with configuration of min/max limits for different GPUs.
-	GpuTotal []GpuLimits
-	// NodeGroupAutoDiscovery represents one or more definition(s) of node group auto-discovery
-	NodeGroupAutoDiscovery []string
 	// EstimatorName is the estimator used to estimate the number of needed nodes in scale up.
 	EstimatorName string
-	// ExpanderNames sets the chain of node group expanders to be used in scale up
-	ExpanderNames string
 	// GRPCExpanderCert is the location of the cert passed to the gRPC server for TLS when using the gRPC expander
 	GRPCExpanderCert string
 	// GRPCExpanderURL is the url of the gRPC server when using the gRPC expander
@@ -131,18 +120,6 @@ type AutoscalingOptions struct {
 	MaxTotalUnreadyPercentage float64
 	// OkTotalUnreadyCount is the number of allowed unready nodes, irrespective of max-total-unready-percentage
 	OkTotalUnreadyCount int
-	// ScaleUpFromZero defines if CA should scale up when there 0 ready nodes.
-	ScaleUpFromZero bool
-	// ParallelScaleUp defines whether CA can scale up node groups in parallel.
-	ParallelScaleUp bool
-	// CloudConfig is the path to the cloud provider configuration file. Empty string for no configuration file.
-	CloudConfig string
-	// CloudProviderName sets the type of the cloud provider CA is about to run in. Allowed values: gce, aws
-	CloudProviderName string
-	// NodeGroups is the list of node groups a.k.a autoscaling targets
-	NodeGroups []string
-	// EnforceNodeGroupMinSize is used to allow CA to scale up the node group to the configured min size if needed.
-	EnforceNodeGroupMinSize bool
 	// ScaleDownEnabled is used to allow CA to scale down the cluster
 	ScaleDownEnabled bool
 	// ScaleDownUnreadyEnabled is used to allow CA to scale down unready nodes of the cluster

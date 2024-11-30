@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/docent-net/cluster-bare-autoscaler/config"
+	"github.com/docent-net/cluster-bare-autoscaler/utils/errors"
 
 	"k8s.io/client-go/informers"
 	kube_client "k8s.io/client-go/kubernetes"
