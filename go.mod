@@ -4,7 +4,11 @@ go 1.23
 
 toolchain go1.23.3
 
+replace github.com/docent-net/cluster-bare-autoscaler/config => ./config
+
 replace github.com/docent-net/cluster-bare-autoscaler/metrics => ./metrics
+
+replace github.com/docent-net/cluster-bare-autoscaler/utils/units => ./utils/units
 
 replace github.com/docent-net/cluster-bare-autoscaler/version => ./version
 
