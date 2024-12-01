@@ -20,6 +20,10 @@ replace github.com/docent-net/cluster-bare-autoscaler/version => ./version
 
 replace k8s.io/apiextensions-apiserver => github.com/kubernetes/apiextensions-apiserver v0.31.3
 
+replace "github.com/docent-net/cluster-bare-autoscaler/clusterstate/utils" => ./clusterstate/utils
+
+replace "github.com/docent-net/cluster-bare-autoscaler/clusterstate/api" => ./clusterstate/api
+
 replace k8s.io/cli-runtime => github.com/kubernetes/cli-runtime v0.31.3
 
 replace k8s.io/cloud-provider => github.com/kubernetes/cloud-provider v0.31.3
@@ -61,7 +65,6 @@ replace k8s.io/pod-security-admission => github.com/kubernetes/pod-security-admi
 replace k8s.io/sample-apiserver => github.com/kubernetes/sample-apiserver v0.31.3
 
 require (
-	github.com/prometheus/client_golang v1.20.5
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.10.0
 	k8s.io/api v0.31.3
@@ -86,6 +89,7 @@ require (
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
@@ -96,12 +100,12 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
-	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.60.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect

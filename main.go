@@ -150,7 +150,7 @@ func createAutoscalingOptions() config.AutoscalingOptions {
 	}
 }
 
-func buildAutoscaler(context ctx.Context) (core.Autoscaler, *loop.LoopTrigger, error) {
+func buildAutoscaler(context ctx.Context) (core.Autoscaler, error) {
 	// Create basic config from flags.
 	autoscalingOptions := createAutoscalingOptions()
 
@@ -176,7 +176,7 @@ func buildAutoscaler(context ctx.Context) (core.Autoscaler, *loop.LoopTrigger, e
 	// Create autoscaler.
 	autoscaler, err := core.NewAutoscaler(opts, informerFactory)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Start informers. This must come after fully constructing the autoscaler because
@@ -184,14 +184,7 @@ func buildAutoscaler(context ctx.Context) (core.Autoscaler, *loop.LoopTrigger, e
 	stop := make(chan struct{})
 	informerFactory.Start(stop)
 
-	podObserver := loop.StartPodObserver(context, kube_util.CreateKubeClient(autoscalingOptions.KubeClientOpts))
-
-	// A ProvisioningRequestPodsInjector is used as provisioningRequestProcessingTimesGetter here to obtain the last time a
-	// ProvisioningRequest was processed. This is because the ProvisioningRequestPodsInjector in addition to injecting pods
-	// also marks the ProvisioningRequest as accepted or failed.
-	trigger := loop.NewLoopTrigger(autoscaler, ProvisioningRequestInjector, podObserver, *scanInterval)
-
-	return autoscaler, trigger, nil
+	return autoscaler, nil
 }
 
 func run(healthCheck *metrics.HealthCheck) {
@@ -200,7 +193,7 @@ func run(healthCheck *metrics.HealthCheck) {
 	context, cancel := ctx.WithCancel(ctx.Background())
 	defer cancel()
 
-	autoscaler, trigger, err := buildAutoscaler(context)
+	autoscaler, err := buildAutoscaler(context)
 	if err != nil {
 		klog.Fatalf("Failed to create autoscaler: %v", err)
 	}

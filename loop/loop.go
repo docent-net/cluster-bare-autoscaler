@@ -1,3 +1,22 @@
+/*
+Copyright 2016 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+This package was copied from the upstream Cluster Autoscaler repo and customized to work with Cluster Bare
+Autoscaler
+*/
+
 package loop
 
 import (
@@ -38,7 +57,6 @@ type provisioningRequestProcessingTimesGetter interface {
 
 // LoopTrigger object implements criteria used to start new autoscaling iteration
 type LoopTrigger struct {
-	podObserver                          *UnschedulablePodObserver
 	scanInterval                         time.Duration
 	scalingTimesGetter                   scalingTimesGetter
 	provisioningRequestProcessTimeGetter provisioningRequestProcessingTimesGetter
@@ -47,7 +65,6 @@ type LoopTrigger struct {
 // NewLoopTrigger creates a LoopTrigger object
 func NewLoopTrigger(scalingTimesGetter scalingTimesGetter, provisioningRequestProcessTimeGetter provisioningRequestProcessingTimesGetter, podObserver *UnschedulablePodObserver, scanInterval time.Duration) *LoopTrigger {
 	return &LoopTrigger{
-		podObserver:                          podObserver,
 		scanInterval:                         scanInterval,
 		scalingTimesGetter:                   scalingTimesGetter,
 		provisioningRequestProcessTimeGetter: provisioningRequestProcessTimeGetter,
@@ -80,8 +97,6 @@ func (t *LoopTrigger) Wait(lastRun time.Time) {
 	select {
 	case <-time.After(t.scanInterval):
 		klog.Infof("Autoscaler loop triggered by a %v timer", t.scanInterval)
-	case <-t.podObserver.unschedulablePodChan:
-		klog.Info("Autoscaler loop triggered by unschedulable pod appearing")
 	}
 }
 
@@ -120,8 +135,8 @@ func StartPodObserver(ctx context.Context, kubeClient kube_client.Interface) *Un
 // logTriggerReason logs a message if the next iteration was not triggered by unschedulable pods appearing, else it logs a message that the next iteration was triggered by unschedulable pods appearing
 func (t *LoopTrigger) logTriggerReason(message string) {
 	select {
-	case <-t.podObserver.unschedulablePodChan:
-		klog.Info("Autoscaler loop triggered by unschedulable pod appearing")
+	//case <-t.podObserver.unschedulablePodChan:
+	//	klog.Info("Autoscaler loop triggered by unschedulable pod appearing")
 	default:
 		klog.Infof(message)
 	}
