@@ -42,6 +42,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	metrics.Evaluations.Inc()
 
+	if r.state.IsGlobalCooldownActive(time.Now(), r.cfg.Cooldown) {
+		slog.Info("Global cooldown active — skipping scale-down")
+		return nil
+	}
+
 	var allNodes *v1.NodeList
 	{
 		nodeSpanCtx, nodeSpan := otel.Tracer("autoscaler").Start(ctx, "list-nodes")
@@ -96,6 +101,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		} else {
 			slog.Info("Shutdown initiated", "node", candidate.Name)
 			metrics.ShutdownSuccesses.Inc()
+			r.state.MarkGlobalShutdown()
 		}
 	}
 

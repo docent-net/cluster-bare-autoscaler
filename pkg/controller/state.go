@@ -9,6 +9,7 @@ type NodeStateTracker struct {
 	mu               sync.Mutex
 	recentlyShutdown map[string]time.Time
 	poweredOff       map[string]bool
+	lastShutdownTime time.Time
 }
 
 func NewNodeStateTracker() *NodeStateTracker {
@@ -16,6 +17,18 @@ func NewNodeStateTracker() *NodeStateTracker {
 		recentlyShutdown: make(map[string]time.Time),
 		poweredOff:       make(map[string]bool),
 	}
+}
+
+func (n *NodeStateTracker) MarkGlobalShutdown() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.lastShutdownTime = time.Now()
+}
+
+func (n *NodeStateTracker) IsGlobalCooldownActive(now time.Time, cooldown time.Duration) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return now.Sub(n.lastShutdownTime) < cooldown
 }
 
 func (n *NodeStateTracker) MarkPoweredOff(nodeName string) {
