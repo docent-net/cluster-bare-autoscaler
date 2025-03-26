@@ -12,6 +12,7 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/controller"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/kubeclient"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/tracing"
 )
 
 func main() {
@@ -21,6 +22,12 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	if err := tracing.Init("cluster-bare-autoscaler"); err != nil {
+		slog.Error("failed to init tracing", "err", err)
+		os.Exit(1)
+	}
+	defer tracing.Shutdown(context.Background())
 
 	metrics.Init()
 

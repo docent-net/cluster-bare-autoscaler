@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -33,17 +35,36 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
+	ctx, span := otel.Tracer("autoscaler").Start(ctx, "reconcile-loop")
+	defer span.End()
+
 	slog.Info("Running reconcile loop")
 
 	metrics.Evaluations.Inc()
 
-	allNodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return err
+	var allNodes *v1.NodeList
+	{
+		nodeSpanCtx, nodeSpan := otel.Tracer("autoscaler").Start(ctx, "list-nodes")
+		defer nodeSpan.End()
+
+		var err error
+		allNodes, err = r.client.CoreV1().Nodes().List(nodeSpanCtx, metav1.ListOptions{})
+		if err != nil {
+			slog.Error("failed to list nodes", "err", err)
+			// Optionally annotate span with error
+			nodeSpan.RecordError(err)
+			return err
+		}
 	}
 
-	eligible := r.getEligibleNodes(allNodes.Items)
-	slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(allNodes.Items))
+	var eligible []v1.Node
+	{
+		_, span := otel.Tracer("autoscaler").Start(ctx, "filter-eligible-nodes")
+		defer span.End()
+
+		eligible = r.getEligibleNodes(allNodes.Items)
+		slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(allNodes.Items))
+	}
 
 	candidate := r.pickScaleDownCandidate(eligible)
 	if candidate == nil {
@@ -55,17 +76,27 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	metrics.ScaleDowns.Inc()
 
-	if err := r.cordonAndDrain(ctx, candidate); err != nil {
-		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
-		return nil
+	{
+		_, span := otel.Tracer("autoscaler").Start(ctx, "cordon-and-drain")
+		defer span.End()
+
+		if err := r.cordonAndDrain(ctx, candidate); err != nil {
+			slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
+			return nil
+		}
 	}
 
-	metrics.ShutdownAttempts.Inc()
-	if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
-		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
-	} else {
-		slog.Info("Shutdown initiated", "node", candidate.Name)
-		metrics.ShutdownSuccesses.Inc()
+	{
+		_, span := otel.Tracer("autoscaler").Start(ctx, "shutdown")
+		defer span.End()
+
+		metrics.ShutdownAttempts.Inc()
+		if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
+			slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
+		} else {
+			slog.Info("Shutdown initiated", "node", candidate.Name)
+			metrics.ShutdownSuccesses.Inc()
+		}
 	}
 
 	r.state.MarkShutdown(candidate.Name)

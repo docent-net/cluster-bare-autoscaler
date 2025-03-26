@@ -2,6 +2,7 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	v1 "k8s.io/api/core/v1"
@@ -23,7 +24,10 @@ func TestGetEligibleNodes(t *testing.T) {
 			"node-role.kubernetes.io/control-plane": "",
 		},
 	}
-	r := &Reconciler{cfg: cfg}
+	r := &Reconciler{
+		cfg:   cfg,
+		state: NewNodeStateTracker(),
+	}
 
 	nodes := []v1.Node{
 		makeNode("node1", map[string]string{}),
@@ -41,7 +45,10 @@ func TestPickScaleDownCandidate(t *testing.T) {
 	cfg := &config.Config{
 		MinNodes: 2,
 	}
-	r := &Reconciler{cfg: cfg}
+	r := &Reconciler{
+		cfg:   cfg,
+		state: NewNodeStateTracker(),
+	}
 
 	nodes := []v1.Node{
 		makeNode("node1", nil),
@@ -58,5 +65,38 @@ func TestPickScaleDownCandidate(t *testing.T) {
 	candidate = r.pickScaleDownCandidate(nodes)
 	if candidate != nil {
 		t.Errorf("expected nil candidate when at or below MinNodes, got %v", candidate)
+	}
+}
+
+func TestCooldownExclusion(t *testing.T) {
+	cfg := &config.Config{
+		Cooldown: 5 * time.Minute,
+	}
+	state := NewNodeStateTracker()
+	r := &Reconciler{cfg: cfg, state: state}
+
+	node := makeNode("node1", nil)
+	state.MarkShutdown("node1")
+	state.recentlyShutdown["node1"] = time.Now().Add(-1 * time.Minute)
+
+	nodes := []v1.Node{node}
+	eligible := r.getEligibleNodes(nodes)
+	if len(eligible) != 0 {
+		t.Errorf("expected 0 eligible nodes due to cooldown, got %d", len(eligible))
+	}
+}
+
+func TestPoweredOffNodeIsExcluded(t *testing.T) {
+	r := &Reconciler{
+		cfg:   &config.Config{},
+		state: NewNodeStateTracker(),
+	}
+	node := makeNode("node2", nil)
+	r.state.MarkPoweredOff("node2")
+
+	nodes := []v1.Node{node}
+	eligible := r.getEligibleNodes(nodes)
+	if len(eligible) != 0 {
+		t.Errorf("expected 0 eligible nodes due to powered-off status, got %d", len(eligible))
 	}
 }
