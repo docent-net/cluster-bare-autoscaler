@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
 
 	v1 "k8s.io/api/core/v1"
@@ -9,15 +11,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/power"
 )
 
 type Reconciler struct {
 	cfg    *config.Config
 	client *kubernetes.Clientset
+	power  power.PowerController
 }
 
 func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler {
-	return &Reconciler{cfg: cfg, client: client}
+	return &Reconciler{
+		cfg:    cfg,
+		client: client,
+		power:  &power.LogPowerController{},
+	}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -39,8 +47,15 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
 
-	if err := r.cordonAndDrainDryRun(ctx, candidate); err != nil {
-		slog.Error("cordonAndDrainDryRun failed", "err", err)
+	if err := r.cordonAndDrain(ctx, candidate); err != nil {
+		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
+		return nil
+	}
+
+	if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
+		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
+	} else {
+		slog.Info("Shutdown initiated", "node", candidate.Name)
 	}
 
 	return nil
@@ -58,6 +73,11 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 			}
 		}
 		if !skip {
+			if node.Spec.Unschedulable {
+				slog.Info("Skipping node because it is already cordoned", "node", node.Name)
+				continue
+			}
+
 			eligible = append(eligible, node)
 		}
 	}
@@ -71,10 +91,18 @@ func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {
 	return &eligible[len(eligible)-1]
 }
 
-func (r *Reconciler) cordonAndDrainDryRun(ctx context.Context, node *v1.Node) error {
-	slog.Info("Dry-run: cordon node", "node", node.Name)
+func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
+	// Step 1: Cordon
+	nodeCopy := node.DeepCopy()
+	nodeCopy.Spec.Unschedulable = true
 
-	// List all pods on the node
+	_, err := r.client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+	slog.Info("Node cordoned", "node", node.Name)
+
+	// Step 2: List pods on node
 	pods, err := r.client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + node.Name,
 	})
@@ -83,21 +111,35 @@ func (r *Reconciler) cordonAndDrainDryRun(ctx context.Context, node *v1.Node) er
 	}
 
 	for _, pod := range pods.Items {
-		// Skip mirror pods (static pods)
+		// Skip mirror pods
 		if _, ok := pod.Annotations["kubernetes.io/config.mirror"]; ok {
-			slog.Info("Skipping mirror pod", "pod", pod.Name, "ns", pod.Namespace)
+			slog.Info("Skipping mirror pod", "pod", pod.Name)
 			continue
 		}
 		// Skip DaemonSet pods
-		if controllerRef := metav1.GetControllerOf(&pod); controllerRef != nil && controllerRef.Kind == "DaemonSet" {
-			slog.Info("Skipping DaemonSet pod", "pod", pod.Name, "ns", pod.Namespace)
+		if ref := metav1.GetControllerOf(&pod); ref != nil && ref.Kind == "DaemonSet" {
+			slog.Info("Skipping DaemonSet pod", "pod", pod.Name)
 			continue
 		}
 
-		// Log pod that would be evicted
-		slog.Info("Dry-run: evict pod", "pod", pod.Name, "ns", pod.Namespace)
+		// Try eviction
+		eviction := &policyv1.Eviction{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			DeleteOptions: &metav1.DeleteOptions{},
+		}
+
+		err := r.client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
+		if err != nil {
+			slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
+			return errors.New("aborting drain due to eviction failure")
+		}
+
+		slog.Info("Evicted pod", "pod", pod.Name, "ns", pod.Namespace)
 	}
 
-	slog.Info("Dry-run: node would be drained", "node", node.Name)
+	slog.Info("Node drained successfully", "node", node.Name)
 	return nil
 }
