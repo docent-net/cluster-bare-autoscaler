@@ -44,7 +44,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 
 	slog.Info("Filtered nodes", "eligible", len(eligibleNodes), "total", len(nodes.Items))
-	// TODO: Evaluate if any nodes can be safely shut down
+	if len(eligibleNodes) <= r.cfg.MinNodes {
+		slog.Info("No scale-down possible", "eligible", len(eligibleNodes), "minNodes", r.cfg.MinNodes)
+		return nil
+	}
+
+	// Pick the last eligible node as candidate for now (simplest approach)
+	candidate := eligibleNodes[len(eligibleNodes)-1]
+	slog.Info("Candidate for scale-down", "node", candidate.Name)
 
 	return nil
 }
