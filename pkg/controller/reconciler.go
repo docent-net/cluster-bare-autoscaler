@@ -5,6 +5,7 @@ import (
 	"errors"
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,7 @@ type Reconciler struct {
 	cfg    *config.Config
 	client *kubernetes.Clientset
 	power  power.PowerController
+	state  *NodeStateTracker
 }
 
 func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler {
@@ -25,6 +27,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler
 		cfg:    cfg,
 		client: client,
 		power:  &power.LogPowerController{},
+		state:  NewNodeStateTracker(),
 	}
 }
 
@@ -58,6 +61,8 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		slog.Info("Shutdown initiated", "node", candidate.Name)
 	}
 
+	r.state.MarkShutdown(candidate.Name)
+
 	return nil
 }
 
@@ -75,6 +80,11 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 		if !skip {
 			if node.Spec.Unschedulable {
 				slog.Info("Skipping node because it is already cordoned", "node", node.Name)
+				continue
+			}
+
+			if r.state.IsInCooldown(node.Name, time.Now(), r.cfg.Cooldown) {
+				slog.Info("Skipping node due to cooldown", "node", node.Name)
 				continue
 			}
 
