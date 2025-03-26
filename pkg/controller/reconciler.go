@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
 	"time"
@@ -34,6 +35,8 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	slog.Info("Running reconcile loop")
 
+	metrics.Evaluations.Inc()
+
 	allNodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
@@ -50,15 +53,19 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
 
+	metrics.ScaleDowns.Inc()
+
 	if err := r.cordonAndDrain(ctx, candidate); err != nil {
 		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
 		return nil
 	}
 
+	metrics.ShutdownAttempts.Inc()
 	if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
 		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
 	} else {
 		slog.Info("Shutdown initiated", "node", candidate.Name)
+		metrics.ShutdownSuccesses.Inc()
 	}
 
 	r.state.MarkShutdown(candidate.Name)
@@ -144,6 +151,7 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 		err := r.client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
 		if err != nil {
 			slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
+			metrics.EvictionFailures.Inc()
 			return errors.New("aborting drain due to eviction failure")
 		}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/controller"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/kubeclient"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
 )
 
 func main() {
@@ -20,6 +21,8 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	metrics.Init()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
