@@ -69,6 +69,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 
 	r.state.MarkShutdown(candidate.Name)
+	r.state.MarkPoweredOff(candidate.Name)
 
 	return nil
 }
@@ -92,6 +93,11 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 
 			if r.state.IsInCooldown(node.Name, time.Now(), r.cfg.Cooldown) {
 				slog.Info("Skipping node due to cooldown", "node", node.Name)
+				continue
+			}
+
+			if r.state.IsPoweredOff(node.Name) {
+				slog.Info("Skipping node: already powered off", "node", node.Name)
 				continue
 			}
 
