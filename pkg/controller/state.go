@@ -25,6 +25,12 @@ func (n *NodeStateTracker) MarkGlobalShutdown() {
 	n.lastShutdownTime = time.Now()
 }
 
+func (n *NodeStateTracker) ClearPoweredOff(nodeName string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.poweredOff, nodeName)
+}
+
 func (n *NodeStateTracker) IsGlobalCooldownActive(now time.Time, cooldown time.Duration) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()

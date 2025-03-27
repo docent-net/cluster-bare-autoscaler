@@ -10,6 +10,7 @@ nodes:
     ip: 172.20.4.15
   - name: node4
     ip: 172.20.4.16
+#    disabled: true
   - name: node5
     ip: 172.20.4.17
   - name: node14

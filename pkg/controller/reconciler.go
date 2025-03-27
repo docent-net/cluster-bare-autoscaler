@@ -38,47 +38,82 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	ctx, span := otel.Tracer("autoscaler").Start(ctx, "reconcile-loop")
 	defer span.End()
 
-	slog.Info("Running reconcile loop")
-
-	metrics.Evaluations.Inc()
-
 	if r.state.IsGlobalCooldownActive(time.Now(), r.cfg.Cooldown) {
-		slog.Info("Global cooldown active — skipping scale-down")
+		slog.Info("Global cooldown active — skipping reconcile loop")
 		return nil
 	}
 
-	var allNodes *v1.NodeList
-	{
-		nodeSpanCtx, nodeSpan := otel.Tracer("autoscaler").Start(ctx, "list-nodes")
-		defer nodeSpan.End()
+	slog.Info("Running reconcile loop")
+	metrics.Evaluations.Inc()
 
-		var err error
-		allNodes, err = r.client.CoreV1().Nodes().List(nodeSpanCtx, metav1.ListOptions{})
-		if err != nil {
-			slog.Error("failed to list nodes", "err", err)
-			// Optionally annotate span with error
-			nodeSpan.RecordError(err)
-			return err
+	allNodes, err := r.listAllNodes(ctx)
+	if err != nil {
+		return err
+	}
+
+	eligible := r.filterEligibleNodes(ctx, allNodes.Items)
+
+	if r.maybeScaleDown(ctx, eligible) {
+		return nil // stop here to avoid scaling up in the same loop
+	}
+
+	r.maybeScaleUp(ctx)
+	return nil
+}
+
+func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []v1.Node {
+	_, span := otel.Tracer("autoscaler").Start(ctx, "filter-eligible-nodes")
+	defer span.End()
+
+	eligible := r.getEligibleNodes(nodes)
+	slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(nodes))
+	return eligible
+}
+
+func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
+	spanCtx, span := otel.Tracer("autoscaler").Start(ctx, "list-nodes")
+	defer span.End()
+
+	nodes, err := r.client.CoreV1().Nodes().List(spanCtx, metav1.ListOptions{})
+	if err != nil {
+		slog.Error("failed to list nodes", "err", err)
+		span.RecordError(err)
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func (r *Reconciler) maybeScaleUp(ctx context.Context) {
+	if !r.shouldScaleUp(ctx) {
+		return
+	}
+
+	for _, nodeCfg := range r.cfg.Nodes {
+		if nodeCfg.Disabled {
+			continue
+		}
+		if r.state.IsPoweredOff(nodeCfg.Name) {
+			slog.Info("Attempting scale-up", "node", nodeCfg.Name)
+			err := r.power.PowerOn(ctx, nodeCfg.Name)
+			if err != nil {
+				slog.Error("PowerOn failed", "node", nodeCfg.Name, "err", err)
+			} else {
+				slog.Info("Scale-up triggered", "node", nodeCfg.Name)
+				r.state.ClearPoweredOff(nodeCfg.Name)
+			}
+			break // one per loop
 		}
 	}
+}
 
-	var eligible []v1.Node
-	{
-		_, span := otel.Tracer("autoscaler").Start(ctx, "filter-eligible-nodes")
-		defer span.End()
-
-		eligible = r.getEligibleNodes(allNodes.Items)
-		slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(allNodes.Items))
-	}
-
+func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) bool {
 	candidate := r.pickScaleDownCandidate(eligible)
 	if candidate == nil {
 		slog.Info("No scale-down possible", "eligible", len(eligible), "minNodes", r.cfg.MinNodes)
-		return nil
+		return false
 	}
 
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
-
 	metrics.ScaleDowns.Inc()
 
 	{
@@ -87,7 +122,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 		if err := r.cordonAndDrain(ctx, candidate); err != nil {
 			slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
-			return nil
+			return false
 		}
 	}
 
@@ -107,8 +142,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	r.state.MarkShutdown(candidate.Name)
 	r.state.MarkPoweredOff(candidate.Name)
-
-	return nil
+	return true
 }
 
 func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
@@ -142,6 +176,10 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 		}
 	}
 	return eligible
+}
+
+func (r *Reconciler) shouldScaleUp(ctx context.Context) bool {
+	return true // Always scale up — will replace with real strategy later
 }
 
 func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {

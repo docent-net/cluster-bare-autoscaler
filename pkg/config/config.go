@@ -8,8 +8,9 @@ import (
 )
 
 type NodeConfig struct {
-	Name string `yaml:"name"`
-	IP   string `yaml:"ip"`
+	Name     string `yaml:"name"`
+	IP       string `yaml:"ip"`
+	Disabled bool   `yaml:"disabled,omitempty"`
 }
 
 type Config struct {
