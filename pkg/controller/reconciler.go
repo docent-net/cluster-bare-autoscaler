@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
+
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
 	"time"
@@ -15,22 +15,41 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/power"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/strategy"
 )
 
 type Reconciler struct {
-	cfg    *config.Config
-	client *kubernetes.Clientset
-	power  power.PowerController
-	state  *NodeStateTracker
+	cfg               *config.Config
+	client            *kubernetes.Clientset
+	power             power.PowerController
+	state             *NodeStateTracker
+	scaleDownStrategy strategy.ScaleDownStrategy
 }
 
 func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler {
 	return &Reconciler{
 		cfg:    cfg,
 		client: client,
-		power:  &power.LogPowerController{},
-		state:  NewNodeStateTracker(),
+		scaleDownStrategy: &strategy.ResourceAwareScaleDown{
+			Client: client,
+			Cfg:    cfg,
+			NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+				list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return list.Items, nil
+			},
+			PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+				list, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return list.Items, nil
+			},
+		},
 	}
 }
 
@@ -110,6 +129,16 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 	candidate := r.pickScaleDownCandidate(eligible)
 	if candidate == nil {
 		slog.Info("No scale-down possible", "eligible", len(eligible), "minNodes", r.cfg.MinNodes)
+		return false
+	}
+
+	ok, err := r.scaleDownStrategy.ShouldScaleDown(ctx, candidate.Name)
+	if err != nil {
+		slog.Error("Scale-down strategy failed", "err", err)
+		return false
+	}
+	if !ok {
+		slog.Info("Scale-down strategy: node not eligible", "node", candidate.Name)
 		return false
 	}
 

@@ -19,6 +19,8 @@ type Config struct {
 	PollInterval time.Duration     `yaml:"pollInterval"`
 	IgnoreLabels map[string]string `yaml:"ignoreLabels"`
 	Nodes        []NodeConfig      `yaml:"nodes"`
+
+	ResourceBufferPercentage int `yaml:"resourceBufferPercentage"`
 }
 
 func Load(path string) (*Config, error) {
