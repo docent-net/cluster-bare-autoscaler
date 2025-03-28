@@ -18,6 +18,43 @@ func makeNode(name string, labels map[string]string) v1.Node {
 	}
 }
 
+func TestGetEligibleNodes_Shuffling(t *testing.T) {
+	r := &Reconciler{
+		cfg:   mockConfig(),
+		state: NewNodeStateTracker(),
+	}
+
+	nodes := []v1.Node{
+		{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "node3"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "node4"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "node5"}},
+	}
+
+	pickedLast := map[string]bool{}
+
+	for i := 0; i < 100; i++ {
+		eligible := r.getEligibleNodes(nodes)
+		last := eligible[len(eligible)-1].Name
+		pickedLast[last] = true
+		if len(pickedLast) >= 3 {
+			break
+		}
+	}
+
+	if len(pickedLast) < 3 {
+		t.Errorf("Shuffling appears ineffective, only got %v as final candidate", pickedLast)
+	}
+}
+
+func mockConfig() *config.Config {
+	return &config.Config{
+		Cooldown:     time.Minute,
+		IgnoreLabels: map[string]string{},
+	}
+}
+
 func TestGetEligibleNodes(t *testing.T) {
 	cfg := &config.Config{
 		IgnoreLabels: map[string]string{

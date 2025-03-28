@@ -6,6 +6,7 @@ import (
 
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
+	"math/rand"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -204,6 +205,13 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 			eligible = append(eligible, node)
 		}
 	}
+
+	// Shuffle to avoid always picking the same node
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(eligible), func(i, j int) {
+		eligible[i], eligible[j] = eligible[j], eligible[i]
+	})
+
 	return eligible
 }
 
