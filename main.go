@@ -71,6 +71,11 @@ func main() {
 
 	startHealthEndpoints()
 
+	if cfg.BootstrapCooldownSeconds > 0 {
+		slog.Info("Waiting for bootstrap cooldown", "seconds", cfg.BootstrapCooldownSeconds)
+		time.Sleep(time.Duration(cfg.BootstrapCooldownSeconds) * time.Second)
+	}
+
 	r := controller.NewReconciler(cfg, clientset)
 	ctx := context.Background()
 	for {
@@ -82,6 +87,8 @@ func main() {
 }
 
 func startHealthEndpoints() {
+	slog.Info("Starting health endpoints on :8080")
+
 	http.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -91,7 +98,6 @@ func startHealthEndpoints() {
 		w.Write([]byte("ok"))
 	})
 	go func() {
-		slog.Info("Starting health endpoints on :8080")
 		if err := http.ListenAndServe(":8080", nil); err != nil {
 			slog.Error("health endpoint server crashed", "err", err)
 		}

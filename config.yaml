@@ -5,6 +5,7 @@ pollInterval: 10s
 dryRun:
 resourceBufferCPUPerc: 5
 resourceBufferMemoryPerc: 5
+bootstrapCooldownSeconds: 8
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
   node-home-assistant: yes

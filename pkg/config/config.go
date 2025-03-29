@@ -25,7 +25,8 @@ type Config struct {
 	ResourceBufferCPUPerc    int `yaml:"resourceBufferCPUPerc"`
 	ResourceBufferMemoryPerc int `yaml:"resourceBufferMemoryPerc"`
 
-	DryRun bool `yaml:"dryRun"` // NEW: dry-run mode
+	DryRun                   bool `yaml:"dryRun"` // NEW: dry-run mode
+	BootstrapCooldownSeconds int  `yaml:"bootstrapCooldownSeconds"`
 }
 
 func Load(path string) (*Config, error) {
