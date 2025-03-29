@@ -62,14 +62,14 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 				totalMem += memBytes
 			}
 
-			slog.Info("Pod request", "pod", pod.Name, "ns", pod.Namespace, "cpu", cpuMilli, "mem", memBytes, "node", pod.Spec.NodeName)
+			slog.Debug("Pod request", "pod", pod.Name, "ns", pod.Namespace, "cpu", cpuMilli, "mem", memBytes, "node", pod.Spec.NodeName)
 		}
 	}
 
 	// Add margin
 	marginCPU := clusterCPU * int64(r.Cfg.ResourceBufferPercentage) / 100
 	marginMem := clusterMem * int64(r.Cfg.ResourceBufferPercentage) / 100
-	
+
 	canScale := totalCPU+marginCPU <= clusterCPU && totalMem+marginMem <= clusterMem
 	slog.Info("Resource check",
 		"canScale", canScale,

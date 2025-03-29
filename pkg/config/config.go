@@ -14,6 +14,8 @@ type NodeConfig struct {
 }
 
 type Config struct {
+	LogLevel string `yaml:"logLevel"` // e.g., "info", "debug", "warn"
+
 	MinNodes     int               `yaml:"minNodes"`
 	Cooldown     time.Duration     `yaml:"cooldown"`
 	PollInterval time.Duration     `yaml:"pollInterval"`

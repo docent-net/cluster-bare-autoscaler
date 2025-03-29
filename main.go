@@ -21,9 +21,6 @@ func main() {
 	flag.StringVar(&configPath, "config", "./config.yaml", "Path to config file")
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
-
 	if err := tracing.Init("cluster-bare-autoscaler"); err != nil {
 		slog.Error("failed to init tracing", "err", err)
 		os.Exit(1)
@@ -37,6 +34,21 @@ func main() {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
+
+	var level slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(logger)
 
 	clientset, err := kubeclient.Get()
 	if err != nil {

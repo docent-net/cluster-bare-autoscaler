@@ -1,3 +1,4 @@
+logLevel: debug
 minNodes: 7
 cooldown: 5m
 pollInterval: 10s
