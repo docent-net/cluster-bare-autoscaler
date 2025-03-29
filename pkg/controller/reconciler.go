@@ -60,8 +60,10 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	ctx, span := otel.Tracer("autoscaler").Start(ctx, "reconcile-loop")
 	defer span.End()
 
-	if r.state.IsGlobalCooldownActive(time.Now(), r.cfg.Cooldown) {
-		slog.Info("Global cooldown active — skipping reconcile loop")
+	now := time.Now()
+	if r.state.IsGlobalCooldownActive(now, r.cfg.Cooldown) {
+		remaining := r.cfg.Cooldown - now.Sub(r.state.lastShutdownTime)
+		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining)
 		return nil
 	}
 
