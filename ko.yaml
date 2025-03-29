@@ -1,0 +1,16 @@
+defaultBaseImage: cgr.dev/chainguard/static:latest
+
+builds:
+  default:
+    id: cluster-bare-autoscaler
+    main: .
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - latest
+    ldflags:
+      - "-s -w"
+
+publish:
+  flat: true
