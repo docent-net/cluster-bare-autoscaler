@@ -1,6 +1,6 @@
 apiVersion: v2
 name: cluster-bare-autoscaler
-description: A bare metal Kubernetes autoscaler
+description: A bare-metal Kubernetes cluster autoscaler
 type: application
 version: 0.1.0
-appVersion: "1.0.0"
+appVersion: PLACEHOLDER_VERSION

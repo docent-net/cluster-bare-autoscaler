@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: docent-net/cluster-bare-autoscaler
-  tag: latest
+  repository: docent/cluster-bare-autoscaler
+  tag: "v0.3.1"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

@@ -16,7 +16,11 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/tracing"
 )
 
+var version = "dev"
+
 func main() {
+	slog.Info("Starting cluster-bare-autoscaler", "version", version)
+
 	var (
 		configPath string
 		dryRunFlag bool
