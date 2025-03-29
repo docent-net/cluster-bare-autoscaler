@@ -232,10 +232,16 @@ func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {
 
 func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 	// Step 1: Cordon
-	nodeCopy := node.DeepCopy()
-	nodeCopy.Spec.Unschedulable = true
+	latest, err := r.client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	if err != nil {
+		slog.Error("failed to refetch node before cordon", "node", node.Name, "err", err)
+		return err
+	}
 
-	_, err := r.client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+	latestCopy := latest.DeepCopy()
+	latestCopy.Spec.Unschedulable = true
+
+	_, err = r.client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
