@@ -1,0 +1,46 @@
+replicaCount: 1
+
+image:
+  repository: docent-net/cluster-bare-autoscaler
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+priorityClassName: "system-cluster-critical"
+
+logLevel: debug
+pollInterval: 10s
+cooldown: 5m
+minNodes: 7
+dryRun: true
+
+resourceBuffer:
+  cpuPerc: 5
+  memoryPerc: 5
+
+resources:
+  limits:
+    cpu: 250m
+    memory: 32Mi
+  requests:
+    cpu: 100m
+    memory: 16Mi
+
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+ignoreLabels:
+  node-role.kubernetes.io/control-plane: ""
+  node-home-assistant: "yes"
+
+nodes:
+  - name: node1
+    ip: 192.168.0.1
+  - name: node2
+    ip: 192.168.0.2
+  - name: node3
+    ip: 192.168.0.3
+  - name: node4
+    ip: 192.168.0.4
