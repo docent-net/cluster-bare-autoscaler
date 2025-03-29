@@ -3,20 +3,21 @@ package strategy
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
+	"k8s.io/metrics/pkg/client/clientset/versioned"
 	"log/slog"
 )
 
 type ResourceAwareScaleDown struct {
 	Client        *kubernetes.Clientset
-	MetricsClient metricsclient.Interface
 	Cfg           *config.Config
 	NodeLister    func(context.Context) ([]v1.Node, error)
 	PodLister     func(context.Context) ([]v1.Pod, error)
+	MetricsClient versioned.Interface
 }
 
 func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName string) (bool, error) {
@@ -40,9 +41,63 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 		usageMap[usage.Name] = usage.Usage
 	}
 
-	var totalCPU, totalMem int64
-	var clusterCPU, clusterMem int64
-	var nodeCPU, nodeMem int64
+	totalCPURequest, totalMemRequest := r.SumRequests(pods)
+	totalCPUUsage, totalMemUsage, clusterCPU, clusterMem, nodeCPU, nodeMem, usedCPU, usedMem := r.AnalyzeNodes(nodes, usageMap, nodeName)
+
+	marginCPU := clusterCPU * int64(r.Cfg.ResourceBufferCPUPerc) / 100
+	marginMem := clusterMem * int64(r.Cfg.ResourceBufferMemoryPerc) / 100
+
+	canScaleRequestOK := totalCPURequest+marginCPU <= clusterCPU && totalMemRequest+marginMem <= clusterMem
+	canScaleUsageOK := usedCPU+marginCPU <= clusterCPU && usedMem+marginMem <= clusterMem
+
+	slog.Info("Request-based scale-down check",
+		"canScaleRequestOK", canScaleRequestOK,
+		"totalCPURequest", totalCPURequest,
+		"totalMemRequest", totalMemRequest,
+		"clusterCPU", clusterCPU,
+		"clusterMem", clusterMem,
+		"bufferCPU", marginCPU,
+		"bufferMem", marginMem,
+		"nodeCandidate", nodeName,
+		"nodeCPU", nodeCPU,
+		"nodeMem", nodeMem,
+	)
+
+	slog.Info("Usage-based scale-down check",
+		"canScaleUsageOK", canScaleUsageOK,
+		"totalCPUUsage", totalCPUUsage,
+		"totalMemUsage", totalMemUsage,
+		"usedCPU", usedCPU,
+		"usedMem", usedMem,
+		"nodeCandidate", nodeName,
+	)
+
+	return canScaleRequestOK && canScaleUsageOK, nil
+}
+
+func (r *ResourceAwareScaleDown) SumRequests(pods []v1.Pod) (int64, int64) {
+	var totalCPURequest, totalMemRequest int64
+	for _, pod := range pods {
+		for _, c := range pod.Spec.Containers {
+			if cpu := c.Resources.Requests.Cpu(); cpu != nil {
+				totalCPURequest += cpu.MilliValue()
+			}
+			if mem := c.Resources.Requests.Memory(); mem != nil {
+				totalMemRequest += mem.Value()
+			}
+			slog.Debug("Pod request", "pod", pod.Name, "ns", pod.Namespace)
+		}
+	}
+	return totalCPURequest, totalMemRequest
+}
+
+func (r *ResourceAwareScaleDown) AnalyzeNodes(
+	nodes []v1.Node,
+	usageMap map[string]v1.ResourceList,
+	nodeName string,
+) (int64, int64, int64, int64, int64, int64, int64, int64) {
+	var totalCPUUsage, totalMemUsage, clusterCPU, clusterMem int64
+	var nodeCPU, nodeMem, usedCPU, usedMem int64
 
 	for _, node := range nodes {
 		if node.Name == nodeName {
@@ -51,6 +106,16 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 			}
 			if mem := node.Status.Allocatable.Memory(); mem != nil {
 				nodeMem = mem.Value()
+			}
+			if usage, ok := usageMap[nodeName]; ok {
+				if cpu := usage.Cpu(); cpu != nil {
+					usedCPU = cpu.MilliValue()
+				}
+				if mem := usage.Memory(); mem != nil {
+					usedMem = mem.Value()
+				}
+			} else {
+				slog.Warn("No metrics available for candidate node", "node", nodeName)
 			}
 			continue
 		}
@@ -62,68 +127,15 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 			clusterMem += mem.Value()
 		}
 
-		// Add real usage values
-		usage := usageMap[node.Name]
-		if usage != nil {
+		if usage := usageMap[node.Name]; usage != nil {
 			if cpu := usage.Cpu(); cpu != nil {
-				totalCPU += cpu.MilliValue()
+				totalCPUUsage += cpu.MilliValue()
 			}
 			if mem := usage.Memory(); mem != nil {
-				totalMem += mem.Value()
+				totalMemUsage += mem.Value()
 			}
 		}
 	}
 
-	for _, pod := range pods {
-		for _, c := range pod.Spec.Containers {
-			var cpuMilli, memBytes int64
-
-			if cpu := c.Resources.Requests.Cpu(); cpu != nil {
-				cpuMilli = cpu.MilliValue()
-				totalCPU += cpuMilli
-			}
-			if mem := c.Resources.Requests.Memory(); mem != nil {
-				memBytes = mem.Value()
-				totalMem += memBytes
-			}
-
-			slog.Debug("Pod request", "pod", pod.Name, "ns", pod.Namespace, "cpu", cpuMilli, "mem", memBytes, "node", pod.Spec.NodeName)
-		}
-	}
-
-	// Add margins
-	marginCPU := clusterCPU * int64(r.Cfg.ResourceBufferCPUPerc) / 100
-	marginMem := clusterMem * int64(r.Cfg.ResourceBufferMemoryPerc) / 100
-
-	// Check both request-based and usage-based thresholds independently
-	canScaleRequestOK := totalCPU+marginCPU <= clusterCPU && totalMem+marginMem <= clusterMem
-	canScaleUsageOK := true
-
-	if usage, ok := usageMap[nodeName]; ok {
-		usedCPU := usage.Cpu().MilliValue()
-		usedMem := usage.Memory().Value()
-
-		canScaleUsageOK = usedCPU+marginCPU <= clusterCPU && usedMem+marginMem <= clusterMem
-
-		slog.Info("Usage check for candidate node",
-			"usedCPU", usedCPU, "usedMem", usedMem,
-			"canScaleUsageOK", canScaleUsageOK,
-		)
-	} else {
-		slog.Warn("No metrics available for candidate node", "node", nodeName)
-	}
-
-	canScale := canScaleRequestOK && canScaleUsageOK
-
-	slog.Info("Resource check",
-		"canScale", canScale,
-		"canScaleRequestOK", canScaleRequestOK,
-		"canScaleUsageOK", canScaleUsageOK,
-		"totalCPU", totalCPU, "clusterCPU", clusterCPU,
-		"totalMem", totalMem, "clusterMem", clusterMem,
-		"bufferCPU", marginCPU, "bufferMem", marginMem,
-		"nodeCandidate", nodeName, "nodeCPU", nodeCPU, "nodeMem", nodeMem,
-	)
-
-	return canScale, nil
+	return totalCPUUsage, totalMemUsage, clusterCPU, clusterMem, nodeCPU, nodeMem, usedCPU, usedMem
 }
