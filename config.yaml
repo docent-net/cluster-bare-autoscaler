@@ -1,9 +1,10 @@
-minNodes: 1
+minNodes: 7
 cooldown: 5m
 pollInterval: 10s
 resourceBufferPercentage: 5
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
+  node-home-assistant: yes
 nodes:
   - name: node2
     ip: 172.20.4.14

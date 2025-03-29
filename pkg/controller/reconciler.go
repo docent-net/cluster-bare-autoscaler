@@ -33,6 +33,8 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler
 	return &Reconciler{
 		cfg:    cfg,
 		client: client,
+		state:  NewNodeStateTracker(),
+		power:  &power.LogPowerController{},
 		scaleDownStrategy: &strategy.ResourceAwareScaleDown{
 			Client: client,
 			Cfg:    cfg,

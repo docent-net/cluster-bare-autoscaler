@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -42,6 +44,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	startHealthEndpoints()
+
 	r := controller.NewReconciler(cfg, clientset)
 	ctx := context.Background()
 	for {
@@ -50,4 +54,21 @@ func main() {
 		}
 		time.Sleep(cfg.PollInterval)
 	}
+}
+
+func startHealthEndpoints() {
+	http.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	http.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	go func() {
+		slog.Info("Starting health endpoints on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			slog.Error("health endpoint server crashed", "err", err)
+		}
+	}()
 }
