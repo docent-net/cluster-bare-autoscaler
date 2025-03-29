@@ -34,7 +34,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler
 		cfg:    cfg,
 		client: client,
 		state:  NewNodeStateTracker(),
-		power:  &power.LogPowerController{},
+		power:  &power.LogPowerController{DryRun: cfg.DryRun},
 		scaleDownStrategy: &strategy.ResourceAwareScaleDown{
 			Client: client,
 			Cfg:    cfg,
@@ -125,6 +125,7 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) {
 				slog.Info("Scale-up triggered", "node", nodeCfg.Name)
 				r.state.ClearPoweredOff(nodeCfg.Name)
 			}
+
 			break // one per loop
 		}
 	}
@@ -174,8 +175,11 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		}
 	}
 
-	r.state.MarkShutdown(candidate.Name)
-	r.state.MarkPoweredOff(candidate.Name)
+	if !r.cfg.DryRun {
+		r.state.MarkShutdown(candidate.Name)
+		r.state.MarkPoweredOff(candidate.Name)
+	}
+
 	return true
 }
 
@@ -241,11 +245,15 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 	latestCopy := latest.DeepCopy()
 	latestCopy.Spec.Unschedulable = true
 
-	_, err = r.client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
-	if err != nil {
-		return err
+	if r.cfg.DryRun {
+		slog.Info("Dry-run: would cordon node", "node", node.Name)
+	} else {
+		_, err = r.client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
+		if err != nil {
+			return err
+		}
+		slog.Info("Node cordoned", "node", node.Name)
 	}
-	slog.Info("Node cordoned", "node", node.Name)
 
 	// Step 2: List pods on node
 	pods, err := r.client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
@@ -276,14 +284,17 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 			DeleteOptions: &metav1.DeleteOptions{},
 		}
 
-		err := r.client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
-		if err != nil {
-			slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
-			metrics.EvictionFailures.Inc()
-			return errors.New("aborting drain due to eviction failure")
+		if r.cfg.DryRun {
+			slog.Info("Dry-run: would evict pod", "pod", pod.Name, "ns", pod.Namespace)
+		} else {
+			err := r.client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
+			if err != nil {
+				slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
+				metrics.EvictionFailures.Inc()
+				return errors.New("aborting drain due to eviction failure")
+			}
+			slog.Info("Evicted pod", "pod", pod.Name, "ns", pod.Namespace)
 		}
-
-		slog.Info("Evicted pod", "pod", pod.Name, "ns", pod.Namespace)
 	}
 
 	slog.Info("Node drained successfully", "node", node.Name)

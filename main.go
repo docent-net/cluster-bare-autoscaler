@@ -17,8 +17,12 @@ import (
 )
 
 func main() {
-	var configPath string
+	var (
+		configPath string
+		dryRunFlag bool
+	)
 	flag.StringVar(&configPath, "config", "./config.yaml", "Path to config file")
+	flag.BoolVar(&dryRunFlag, "dry-run", false, "Run without making actual changes")
 	flag.Parse()
 
 	if err := tracing.Init("cluster-bare-autoscaler"); err != nil {
@@ -33,6 +37,11 @@ func main() {
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
+	}
+
+	// Override with CLI flag if set
+	if dryRunFlag {
+		cfg.DryRun = true
 	}
 
 	var level slog.Level

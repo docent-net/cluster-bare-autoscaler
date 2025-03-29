@@ -2,6 +2,7 @@ logLevel: debug
 minNodes: 7
 cooldown: 5m
 pollInterval: 10s
+dryRun:
 resourceBufferCPUPerc: 5
 resourceBufferMemoryPerc: 5
 ignoreLabels:
