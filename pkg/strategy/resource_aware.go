@@ -67,8 +67,8 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 	}
 
 	// Add margin
-	marginCPU := clusterCPU * int64(r.Cfg.ResourceBufferPercentage) / 100
-	marginMem := clusterMem * int64(r.Cfg.ResourceBufferPercentage) / 100
+	marginCPU := clusterCPU * int64(r.Cfg.ResourceBufferCPUPerc) / 100
+	marginMem := clusterMem * int64(r.Cfg.ResourceBufferMemoryPerc) / 100
 
 	canScale := totalCPU+marginCPU <= clusterCPU && totalMem+marginMem <= clusterMem
 	slog.Info("Resource check",

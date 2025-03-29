@@ -14,7 +14,7 @@ type NodeConfig struct {
 }
 
 type Config struct {
-	LogLevel string `yaml:"logLevel"` // e.g., "info", "debug", "warn"
+	LogLevel string `yaml:"logLevel"`
 
 	MinNodes     int               `yaml:"minNodes"`
 	Cooldown     time.Duration     `yaml:"cooldown"`
@@ -22,7 +22,8 @@ type Config struct {
 	IgnoreLabels map[string]string `yaml:"ignoreLabels"`
 	Nodes        []NodeConfig      `yaml:"nodes"`
 
-	ResourceBufferPercentage int `yaml:"resourceBufferPercentage"`
+	ResourceBufferCPUPerc    int `yaml:"resourceBufferCPUPerc"`
+	ResourceBufferMemoryPerc int `yaml:"resourceBufferMemoryPerc"`
 }
 
 func Load(path string) (*Config, error) {

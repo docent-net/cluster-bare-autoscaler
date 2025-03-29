@@ -12,9 +12,96 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 )
 
+func TestResourceAwareScaleDown_BlocksOnCPUOnly(t *testing.T) {
+	strat := &ResourceAwareScaleDown{
+		Cfg: &config.Config{
+			ResourceBufferCPUPerc:    10,
+			ResourceBufferMemoryPerc: 10,
+		},
+		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+			return []v1.Node{
+				newNode("node1", "2000m", "8Gi"),
+				newNode("node2", "2000m", "8Gi"),
+			}, nil
+		},
+		PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+			return []v1.Pod{
+				newPod("pod1", "1900m", "2Gi", "node1"),
+			}, nil
+		},
+	}
+
+	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Errorf("expected scale-down to be blocked due to CPU, but it was allowed")
+	}
+}
+
+func TestResourceAwareScaleDown_BlocksOnMemoryOnly(t *testing.T) {
+	strat := &ResourceAwareScaleDown{
+		Cfg: &config.Config{
+			ResourceBufferCPUPerc:    10,
+			ResourceBufferMemoryPerc: 10,
+		},
+		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+			return []v1.Node{
+				newNode("node1", "8", "2Gi"),
+				newNode("node2", "8", "2Gi"),
+			}, nil
+		},
+		PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+			return []v1.Pod{
+				newPod("pod1", "500m", "1.9Gi", "node1"),
+			}, nil
+		},
+	}
+
+	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Errorf("expected scale-down to be blocked due to Memory, but it was allowed")
+	}
+}
+
+func TestResourceAwareScaleDown_AllowsAtExactLimit(t *testing.T) {
+	strat := &ResourceAwareScaleDown{
+		Cfg: &config.Config{
+			ResourceBufferCPUPerc:    0,
+			ResourceBufferMemoryPerc: 0,
+		},
+		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+			return []v1.Node{
+				newNode("node1", "2000m", "2Gi"),
+				newNode("node2", "2000m", "2Gi"),
+			}, nil
+		},
+		PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+			return []v1.Pod{
+				newPod("pod1", "2000m", "2Gi", "node1"),
+			}, nil
+		},
+	}
+
+	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected scale-down to be allowed at exact limit, but it was blocked")
+	}
+}
+
 func TestResourceAwareScaleDown_AllowsShutdownWhenPlentyOfBuffer(t *testing.T) {
 	strat := &ResourceAwareScaleDown{
-		Cfg: &config.Config{ResourceBufferPercentage: 10},
+		Cfg: &config.Config{
+			ResourceBufferCPUPerc:    10,
+			ResourceBufferMemoryPerc: 10,
+		},
 		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
 			return []v1.Node{
 				newNode("node1", "4000m", "8Gi"),
@@ -40,7 +127,10 @@ func TestResourceAwareScaleDown_AllowsShutdownWhenPlentyOfBuffer(t *testing.T) {
 
 func TestResourceAwareScaleDown_BlocksShutdownIfTooTight(t *testing.T) {
 	strat := &ResourceAwareScaleDown{
-		Cfg: &config.Config{ResourceBufferPercentage: 10},
+		Cfg: &config.Config{
+			ResourceBufferCPUPerc:    10,
+			ResourceBufferMemoryPerc: 10,
+		},
 		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
 			return []v1.Node{
 				newNode("node1", "2000m", "2Gi"),

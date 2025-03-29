@@ -2,7 +2,8 @@ logLevel: debug
 minNodes: 7
 cooldown: 5m
 pollInterval: 10s
-resourceBufferPercentage: 5
+resourceBufferCPUPerc: 5
+resourceBufferMemoryPerc: 5
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
   node-home-assistant: yes
