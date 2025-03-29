@@ -93,3 +93,15 @@ func startHealthEndpoints() {
 		}
 	}()
 }
+
+func init() {
+	flag.Usage = func() {
+		println("Usage: cluster-bare-autoscaler [options]")
+		println()
+		println("Options:")
+		println("  -config string")
+		println("        Path to config file (default \"./config.yaml\")")
+		println("  -dry-run")
+		println("        Run in dry-run mode (no real actions)")
+	}
+}
