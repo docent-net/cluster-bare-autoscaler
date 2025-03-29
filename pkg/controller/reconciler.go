@@ -63,7 +63,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	now := time.Now()
 	if r.state.IsGlobalCooldownActive(now, r.cfg.Cooldown) {
 		remaining := r.cfg.Cooldown - now.Sub(r.state.lastShutdownTime)
-		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining)
+		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining.Round(time.Second).String())
 		return nil
 	}
 
