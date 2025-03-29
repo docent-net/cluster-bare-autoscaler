@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: docent/cluster-bare-autoscaler
-  tag: "0.1.1-dirty"
+  tag: "0.1.2-dirty"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
