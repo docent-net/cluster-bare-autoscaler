@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
+	"k8s.io/metrics/pkg/client/clientset/versioned/fake"
 )
 
 func TestResourceAwareScaleDown_BlocksOnCPUOnly(t *testing.T) {
@@ -29,6 +30,7 @@ func TestResourceAwareScaleDown_BlocksOnCPUOnly(t *testing.T) {
 				newPod("pod1", "1900m", "2Gi", "node1"),
 			}, nil
 		},
+		MetricsClient: fake.NewSimpleClientset(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -57,6 +59,7 @@ func TestResourceAwareScaleDown_BlocksOnMemoryOnly(t *testing.T) {
 				newPod("pod1", "500m", "1.9Gi", "node1"),
 			}, nil
 		},
+		MetricsClient: fake.NewSimpleClientset(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -85,6 +88,7 @@ func TestResourceAwareScaleDown_AllowsAtExactLimit(t *testing.T) {
 				newPod("pod1", "2000m", "2Gi", "node1"),
 			}, nil
 		},
+		MetricsClient: fake.NewSimpleClientset(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -114,6 +118,7 @@ func TestResourceAwareScaleDown_AllowsShutdownWhenPlentyOfBuffer(t *testing.T) {
 				newPod("pod2", "1000m", "1Gi", "node1"),
 			}, nil
 		},
+		MetricsClient: fake.NewSimpleClientset(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -143,6 +148,7 @@ func TestResourceAwareScaleDown_BlocksShutdownIfTooTight(t *testing.T) {
 				newPod("pod2", "500m", "500Mi", "node1"),
 			}, nil
 		},
+		MetricsClient: fake.NewSimpleClientset(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")

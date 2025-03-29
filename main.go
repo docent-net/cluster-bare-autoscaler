@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
+
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/controller"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/kubeclient"
@@ -34,6 +36,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer tracing.Shutdown(context.Background())
+
+	restConfig, err := kubeclient.GetRestConfig()
+	if err != nil {
+		slog.Error("failed to load Kubernetes rest config", "err", err)
+		os.Exit(1)
+	}
+
+	metricsClient, err := metricsclient.NewForConfig(restConfig)
+	if err != nil {
+		slog.Error("failed to init metrics client", "err", err)
+		os.Exit(1)
+	}
 
 	metrics.Init()
 
@@ -76,7 +90,7 @@ func main() {
 		time.Sleep(time.Duration(cfg.BootstrapCooldownSeconds) * time.Second)
 	}
 
-	r := controller.NewReconciler(cfg, clientset)
+	r := controller.NewReconciler(cfg, clientset, metricsClient)
 	ctx := context.Background()
 	for {
 		if err := r.Reconcile(ctx); err != nil {

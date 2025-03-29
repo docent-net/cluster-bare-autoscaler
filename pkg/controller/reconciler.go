@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
@@ -29,15 +30,16 @@ type Reconciler struct {
 	scaleDownStrategy strategy.ScaleDownStrategy
 }
 
-func NewReconciler(cfg *config.Config, client *kubernetes.Clientset) *Reconciler {
+func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface) *Reconciler {
 	return &Reconciler{
 		cfg:    cfg,
 		client: client,
 		state:  NewNodeStateTracker(),
 		power:  &power.LogPowerController{DryRun: cfg.DryRun},
 		scaleDownStrategy: &strategy.ResourceAwareScaleDown{
-			Client: client,
-			Cfg:    cfg,
+			Client:        client,
+			MetricsClient: metricsClient,
+			Cfg:           cfg,
 			NodeLister: func(ctx context.Context) ([]v1.Node, error) {
 				list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 				if err != nil {
