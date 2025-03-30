@@ -27,6 +27,17 @@ type Config struct {
 
 	DryRun                   bool `yaml:"dryRun"` // NEW: dry-run mode
 	BootstrapCooldownSeconds int  `yaml:"bootstrapCooldownSeconds"`
+
+	LoadAverageStrategy LoadAverageStrategyConfig `yaml:"loadAverageStrategy"`
+}
+
+type LoadAverageStrategyConfig struct {
+	Enabled        bool    `yaml:"enabled"`
+	Threshold      float64 `yaml:"threshold"`
+	PodLabel       string  `yaml:"podLabel"`
+	Namespace      string  `yaml:"namespace"`
+	Port           int     `yaml:"port"`
+	TimeoutSeconds int     `yaml:"timeoutSeconds"`
 }
 
 func Load(path string) (*Config, error) {

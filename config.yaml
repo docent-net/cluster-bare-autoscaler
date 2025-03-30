@@ -9,6 +9,13 @@ bootstrapCooldownSeconds: 3
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
   node-home-assistant: yes
+loadAverageStrategy:
+  enabled: true
+  threshold: 0.7
+  podLabel: "app=cluster-bare-autoscaler-sysmetrics"
+  namespace: "cluster-services"
+  port: 9100
+  timeoutSeconds: 3
 nodes:
   - name: node2
     ip: 172.20.4.14

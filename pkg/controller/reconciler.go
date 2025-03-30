@@ -28,34 +28,59 @@ type Reconciler struct {
 	power             power.PowerController
 	state             *NodeStateTracker
 	scaleDownStrategy strategy.ScaleDownStrategy
+	dryRunNodeLoad    *float64 // optional CLI override
 }
 
-func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface) *Reconciler {
-	return &Reconciler{
+type ReconcilerOption func(r *Reconciler)
+
+func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, opts ...ReconcilerOption) *Reconciler {
+	r := &Reconciler{
 		cfg:    cfg,
 		client: client,
 		state:  NewNodeStateTracker(),
 		power:  &power.LogPowerController{DryRun: cfg.DryRun},
-		scaleDownStrategy: &strategy.ResourceAwareScaleDown{
-			Client:        client,
-			MetricsClient: metricsClient,
-			Cfg:           cfg,
-			NodeLister: func(ctx context.Context) ([]v1.Node, error) {
-				list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return nil, err
-				}
-				return list.Items, nil
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	r.scaleDownStrategy = &strategy.MultiStrategy{
+		Strategies: []strategy.ScaleDownStrategy{
+			&strategy.ResourceAwareScaleDown{
+				Client:        client,
+				MetricsClient: metricsClient,
+				Cfg:           cfg,
+				NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+					list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+					if err != nil {
+						return nil, err
+					}
+					return list.Items, nil
+				},
+				PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+					list, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+					if err != nil {
+						return nil, err
+					}
+					return list.Items, nil
+				},
 			},
-			PodLister: func(ctx context.Context) ([]v1.Pod, error) {
-				list, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return nil, err
-				}
-				return list.Items, nil
+			&strategy.LoadAverageScaleDown{
+				Client:         client,
+				Cfg:            cfg,
+				PodLabel:       cfg.LoadAverageStrategy.PodLabel,
+				Namespace:      cfg.LoadAverageStrategy.Namespace,
+				HTTPPort:       cfg.LoadAverageStrategy.Port,
+				HTTPTimeout:    time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
+				Threshold:      cfg.LoadAverageStrategy.Threshold,
+				DryRunOverride: r.dryRunNodeLoad,
 			},
 		},
 	}
+
+	return r
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -140,7 +165,8 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		return false
 	}
 
-	ok, err := r.scaleDownStrategy.ShouldScaleDown(ctx, candidate.Name)
+	ok, err := r.scaleDownStrategy.
+		ShouldScaleDown(ctx, candidate.Name)
 	if err != nil {
 		slog.Error("Scale-down strategy failed", "err", err)
 		return false

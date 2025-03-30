@@ -24,11 +24,13 @@ func main() {
 	slog.Info("Starting cluster-bare-autoscaler", "version", version)
 
 	var (
-		configPath string
-		dryRunFlag bool
+		configPath     string
+		dryRunFlag     bool
+		dryRunNodeLoad float64
 	)
 	flag.StringVar(&configPath, "config", "./config.yaml", "Path to config file")
 	flag.BoolVar(&dryRunFlag, "dry-run", false, "Run without making actual changes")
+	flag.Float64Var(&dryRunNodeLoad, "dry-run-node-load", -1, "Override normalized load for testing (0.0–1.0)")
 	flag.Parse()
 
 	if err := tracing.Init("cluster-bare-autoscaler"); err != nil {
@@ -90,7 +92,12 @@ func main() {
 		time.Sleep(time.Duration(cfg.BootstrapCooldownSeconds) * time.Second)
 	}
 
-	r := controller.NewReconciler(cfg, clientset, metricsClient)
+	var opts []controller.ReconcilerOption
+	if dryRunNodeLoad >= 0 {
+		opts = append(opts, controller.WithDryRunNodeLoad(dryRunNodeLoad))
+	}
+
+	r := controller.NewReconciler(cfg, clientset, metricsClient, opts...)
 	ctx := context.Background()
 	for {
 		if err := r.Reconcile(ctx); err != nil {
@@ -127,5 +134,7 @@ func init() {
 		println("        Path to config file (default \"./config.yaml\")")
 		println("  -dry-run")
 		println("        Run in dry-run mode (no real actions)")
+		println("  -dry-run-node-load float")
+		println("        Override normalized load for testing (0.0–1.0). Skips /load lookup")
 	}
 }
