@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "cluster-bare-autoscaler.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app: {{ include "cluster-bare-autoscaler.name" . }}
 spec:
@@ -14,6 +15,7 @@ spec:
       labels:
         app: {{ include "cluster-bare-autoscaler.name" . }}
     spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
       tolerations:
         {{- toYaml .Values.tolerations | nindent 8 }}
       priorityClassName: {{ .Values.priorityClassName }}

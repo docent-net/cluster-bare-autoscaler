@@ -31,7 +31,9 @@ lint:
 
 .PHONY: build_binary
 build_binary:
-	go build -ldflags="-X main.version=$(TAG)" -o $(BIN_NAME) ./main.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+	go build -ldflags="-s -w -X main.version=$(TAG)" \
+	-o bin/$(BIN_NAME) ./main.go
 
 .PHONY: build_image
 build_image: build_binary
@@ -45,4 +47,4 @@ build_and_publish_image:
 .PHONY: clean
 clean:
 	go clean
-	rm -f $(BIN_NAME)
+	rm -f bin/$(BIN_NAME)

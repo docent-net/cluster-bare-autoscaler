@@ -1,0 +1,42 @@
+{{- if .Values.metricsDaemonset.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cluster-bare-autoscaler.name" . }}-sysmetrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ include "cluster-bare-autoscaler.name" . }}-sysmetrics
+    {{- with .Values.metricsDaemonset.podLabels }}
+    {{ toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "cluster-bare-autoscaler.name" . }}-sysmetrics
+  template:
+    metadata:
+      labels:
+        app: {{ include "cluster-bare-autoscaler.name" . }}-sysmetrics
+        {{- with .Values.metricsDaemonset.podLabels }}
+        {{ toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      containers:
+        - name: sysmetrics
+          image: "{{ .Values.metricsDaemonset.image.repository }}:{{ .Values.metricsDaemonset.image.tag }}"
+          imagePullPolicy: {{ .Values.metricsDaemonset.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.metricsDaemonset.port }}
+          resources:
+            {{- toYaml .Values.metricsDaemonset.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      priorityClassName: {{ .Values.metricsDaemonset.priorityClassName }}
+      imagePullSecrets:
+        {{- toYaml .Values.metricsDaemonset.imagePullSecrets | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.metricsDaemonset.tolerations | nindent 8 }}
+      nodeSelector:
+        {{- toYaml .Values.metricsDaemonset.nodeSelector | nindent 8 }}
+{{- end }}

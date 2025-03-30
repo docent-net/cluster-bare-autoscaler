@@ -35,6 +35,13 @@ ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
   node-home-assistant: "yes"
 
+serviceAccount:
+  create: false
+  name: cluster-bare-autoscaler
+
+rbac:
+  create: false
+
 nodes:
   - name: node1
     ip: 192.168.0.1
@@ -44,3 +51,20 @@ nodes:
     ip: 192.168.0.3
   - name: node4
     ip: 192.168.0.4
+
+metricsDaemonset:
+  enabled: true
+  image:
+    repository: docent/loadavg-exporter
+    tag: v0.1.0
+    pullPolicy: IfNotPresent
+  port: 9100
+  imagePullSecrets: []
+  priorityClassName: "system-cluster-critical"
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+  tolerations: []
+  nodeSelector: {}
+  podLabels: {}
