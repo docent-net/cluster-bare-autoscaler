@@ -1,16 +1,87 @@
-# cluster-bare-autoscaler
-
 # Cluster Bare Autoscaler
+
 ## Introduction
-Cluster Bare Autoscaler is a tool that automatically adjusts the size of the 
-bare-metal Kubernetes cluster when one of the following conditions is true:
 
-- there are nodes in the cluster that have been overutilized for an extended
-  period of time
-- there are nodes in the cluster that have been underutilized for an extended 
-period of time and their pods can be placed on other existing nodes.
+**Cluster Bare Autoscaler (CBA)** automatically adjusts the size of a bare-metal Kubernetes cluster by powering nodes off or on based on real-time resource usage, while safely cordoning and draining nodes before shutdown.
 
-This project is similar to the well-known [cluster-autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler), 
-but with a main difference, that nodes are not terminated nor bootstrapped. 
-Instead, nodes are just shutdown, and brought back (like via Wake-on-Lan, IPMI 
-or any other, pluggable methods)
+This project is similar to the official [Kubernetes Cluster Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler), but with key differences:
+- CBA does **not terminate or bootstrap instances**.
+- Instead, it powers down and wakes up bare-metal nodes using mechanisms like **Wake-on-LAN** (the only implemented one now), or other pluggable power controllers.
+- Nodes are **cordoned and drained safely** before shutdown.
+
+CBA uses a **chainable strategy model** for deciding when to scale down a node. Strategies can be enabled individually or used together:
+- **Resource-aware strategy** — checks CPU and memory requests and usage.
+- **Load average strategy** — evaluates `/proc/loadavg` via a per-node metrics DaemonSet.
+
+It is especially suited for **self-managed data centers**, **homelabs**, or **cloud-like bare-metal environments**.
+
+---
+
+## Features
+
+- ✅ Pluggable scale-down strategies
+- ✅ Resource-aware scale-down (CPU/mem request + usage)
+- ✅ Load average-aware scale-down using `/proc/loadavg`
+- ✅ Multi-strategy support with short-circuit logic
+- ✅ Dry-run mode for testing
+- ✅ Cooldown tracking (global + per-node)
+- ✅ Metrics daemonset for per-node loadavg
+- ✅ Optional Helm chart for deployment
+- ✅ Compatible with Wake-on-LAN (for now, can be extended with IPMI etc)
+- ✅ Safe cordon and drain before shutdown
+
+---
+
+## Installation
+
+### Using Helm
+
+```bash
+helm install cba cluster-bare-autoscaler/cluster-bare-autoscaler \
+  -n <namespace> \
+  -f values.yaml
+```
+
+---
+
+## Configuration
+
+All configuration is passed via a ConfigMap in YAML form.
+The root config keys are defined in the [values.yaml](helm/values.yaml)
+
+---
+
+## Development
+
+### Build the binary
+```bash
+make build_binary
+```
+
+### Run tests
+```bash
+make test
+```
+
+### Build container image (multi-arch with `ko`)
+```bash
+make build_image
+make publish_image
+```
+
+### Run locally
+```bash
+go run main.go --config=./config.yaml --dry-run
+```
+
+---
+
+## Roadmap & TODO
+
+See [TODO.md](TODO.md) for the current feature backlog and development roadmap.
+
+---
+
+## License
+
+MIT
