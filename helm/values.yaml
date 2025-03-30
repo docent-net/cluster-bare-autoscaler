@@ -8,16 +8,6 @@ image:
 imagePullSecrets: []
 priorityClassName: "system-cluster-critical"
 
-logLevel: debug
-pollInterval: 10s
-cooldown: 5m
-minNodes: 7
-dryRun: true
-
-resourceBuffer:
-  cpuPerc: 5
-  memoryPerc: 5
-
 resources:
   limits:
     cpu: 250m
@@ -31,26 +21,12 @@ tolerations:
     operator: "Exists"
     effect: "NoSchedule"
 
-ignoreLabels:
-  node-role.kubernetes.io/control-plane: ""
-  node-home-assistant: "yes"
-
 serviceAccount:
   create: false
   name: cluster-bare-autoscaler
 
 rbac:
   create: false
-
-nodes:
-  - name: node1
-    ip: 192.168.0.1
-  - name: node2
-    ip: 192.168.0.2
-  - name: node3
-    ip: 192.168.0.3
-  - name: node4
-    ip: 192.168.0.4
 
 metricsDaemonset:
   enabled: true
@@ -68,3 +44,31 @@ metricsDaemonset:
   tolerations: []
   nodeSelector: {}
   podLabels: {}
+
+  config:
+    logLevel: debug
+    pollInterval: 10s
+    cooldown: 5m
+    minNodes: 7
+    dryRun: true
+    bootstrapCooldownSeconds: 10
+    resourceBufferCPUPerc: 10
+    resourceBufferMemoryPerc: 10
+    ignoreLabels:
+      node-role.kubernetes.io/control-plane: ""
+    loadAverageStrategy:
+      enabled: true
+      threshold: 0.7
+      podLabel: "app=cluster-bare-autoscaler-sysmetrics"
+      namespace: ""
+      port: 9100
+      timeoutSeconds: 3
+    nodes:
+    - name: node1
+      ip: 192.168.0.1
+    - name: node2
+      ip: 192.168.0.2
+    - name: node3
+      ip: 192.168.0.3
+    - name: node4
+      ip: 192.168.0.4
