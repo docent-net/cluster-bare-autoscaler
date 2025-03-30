@@ -2,29 +2,40 @@ package strategy
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // ScaleDownStrategy evaluates if a node should be scaled down.
 type ScaleDownStrategy interface {
 	ShouldScaleDown(ctx context.Context, nodeName string) (bool, error)
+	Name() string
 }
 
 type MultiStrategy struct {
 	Strategies []ScaleDownStrategy
 }
 
+func (m *MultiStrategy) Name() string {
+	var parts []string
+	for _, s := range m.Strategies {
+		parts = append(parts, s.Name())
+	}
+	return "MultiStrategy(" + strings.Join(parts, ", ") + ")"
+}
+
 func (m *MultiStrategy) ShouldScaleDown(ctx context.Context, nodeName string) (bool, error) {
-	for _, strategy := range m.Strategies {
-		ok, err := strategy.ShouldScaleDown(ctx, nodeName)
+	for _, s := range m.Strategies {
+		ok, err := s.ShouldScaleDown(ctx, nodeName)
 		if err != nil {
-			return false, fmt.Errorf("strategy %T failed: %w", strategy, err)
+			slog.Warn("Strategy returned error", "strategy", s.Name(), "err", err)
+			return false, err
 		}
 		if !ok {
-			slog.Info("Scale-down denied by strategy", "node", nodeName, "strategy", fmt.Sprintf("%T", strategy))
+			slog.Info("Strategy denied scale-down", "strategy", s.Name(), "node", nodeName)
 			return false, nil
 		}
+		slog.Debug("Strategy approved scale-down", "strategy", s.Name(), "node", nodeName)
 	}
 	return true, nil
 }

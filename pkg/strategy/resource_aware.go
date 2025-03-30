@@ -75,6 +75,10 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 	return canScaleRequestOK && canScaleUsageOK, nil
 }
 
+func (r *ResourceAwareScaleDown) Name() string {
+	return "ResourceAware"
+}
+
 func (r *ResourceAwareScaleDown) SumRequests(pods []v1.Pod) (int64, int64) {
 	var totalCPURequest, totalMemRequest int64
 	for _, pod := range pods {

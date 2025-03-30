@@ -46,39 +46,48 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 		opt(r)
 	}
 
-	r.scaleDownStrategy = &strategy.MultiStrategy{
-		Strategies: []strategy.ScaleDownStrategy{
-			&strategy.ResourceAwareScaleDown{
-				Client:        client,
-				MetricsClient: metricsClient,
-				Cfg:           cfg,
-				NodeLister: func(ctx context.Context) ([]v1.Node, error) {
-					list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-					if err != nil {
-						return nil, err
-					}
-					return list.Items, nil
-				},
-				PodLister: func(ctx context.Context) ([]v1.Pod, error) {
-					list, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-					if err != nil {
-						return nil, err
-					}
-					return list.Items, nil
-				},
-			},
-			&strategy.LoadAverageScaleDown{
-				Client:         client,
-				Cfg:            cfg,
-				PodLabel:       cfg.LoadAverageStrategy.PodLabel,
-				Namespace:      cfg.LoadAverageStrategy.Namespace,
-				HTTPPort:       cfg.LoadAverageStrategy.Port,
-				HTTPTimeout:    time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
-				Threshold:      cfg.LoadAverageStrategy.Threshold,
-				DryRunOverride: r.dryRunNodeLoad,
-			},
+	var strategies []strategy.ScaleDownStrategy
+
+	strategies = append(strategies, &strategy.ResourceAwareScaleDown{
+		Client:        client,
+		MetricsClient: metricsClient,
+		Cfg:           cfg,
+		NodeLister: func(ctx context.Context) ([]v1.Node, error) {
+			list, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			return list.Items, nil
 		},
+		PodLister: func(ctx context.Context) ([]v1.Pod, error) {
+			list, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return nil, err
+			}
+			return list.Items, nil
+		},
+	})
+
+	if cfg.LoadAverageStrategy.Enabled {
+		strategies = append(strategies, &strategy.LoadAverageScaleDown{
+			Client:         client,
+			Cfg:            cfg,
+			PodLabel:       cfg.LoadAverageStrategy.PodLabel,
+			Namespace:      cfg.LoadAverageStrategy.Namespace,
+			HTTPPort:       cfg.LoadAverageStrategy.Port,
+			HTTPTimeout:    time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
+			Threshold:      cfg.LoadAverageStrategy.Threshold,
+			DryRunOverride: r.dryRunNodeLoad,
+		})
 	}
+
+	names := []string{}
+	for _, s := range strategies {
+		names = append(names, s.Name())
+	}
+	slog.Info("Configured scale-down strategy chain", "strategies", names)
+
+	r.scaleDownStrategy = &strategy.MultiStrategy{Strategies: strategies}
 
 	return r
 }

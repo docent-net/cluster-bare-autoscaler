@@ -90,6 +90,10 @@ func (l *LoadAverageScaleDown) fetchNormalizedLoad(ctx context.Context, nodeName
 	return normalized, nil
 }
 
+func (l *LoadAverageScaleDown) Name() string {
+	return "LoadAverage"
+}
+
 func (l *LoadAverageScaleDown) findMetricsPodForNode(ctx context.Context, nodeName string) (*v1.Pod, error) {
 	pods, err := l.Client.CoreV1().Pods(l.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: l.PodLabel,
