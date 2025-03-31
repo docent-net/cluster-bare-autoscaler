@@ -24,3 +24,13 @@ jobs:
 
       - name: Run tests with coverage
         run: go test -v -cover ./...
+
+      - name: Generate coverage report
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}  # Required if your repo is private
+          files: coverage.out
+
