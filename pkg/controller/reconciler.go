@@ -115,7 +115,8 @@ func newPowerController(cfg *config.Config, client *kubernetes.Clientset) power.
 			Client:    client,
 		}
 	default:
-		return &power.LogPowerController{DryRun: cfg.DryRun}
+		slog.Warn("Unknown shutdown mode; falling back to noop", "mode", cfg.ShutdownMode)
+		return &power.NoopPowerController{}
 	}
 }
 
