@@ -63,6 +63,7 @@ config:
     namespace: ""
     port: 9100
     timeoutSeconds: 3
+    clusterEvalMode: "p90" # p90 / average / median
   nodes:
   - name: node1
     ip: 192.168.0.1

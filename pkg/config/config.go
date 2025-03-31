@@ -38,6 +38,7 @@ type LoadAverageStrategyConfig struct {
 	Namespace      string  `yaml:"namespace"`
 	Port           int     `yaml:"port"`
 	TimeoutSeconds int     `yaml:"timeoutSeconds"`
+	ClusterEval    string  `yaml:"clusterEval,omitempty"` // "average", "median", or "p90"
 }
 
 func Load(path string) (*Config, error) {

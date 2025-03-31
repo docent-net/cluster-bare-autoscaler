@@ -70,14 +70,16 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 
 	if cfg.LoadAverageStrategy.Enabled {
 		strategies = append(strategies, &strategy.LoadAverageScaleDown{
-			Client:         client,
-			Cfg:            cfg,
-			PodLabel:       cfg.LoadAverageStrategy.PodLabel,
-			Namespace:      cfg.LoadAverageStrategy.Namespace,
-			HTTPPort:       cfg.LoadAverageStrategy.Port,
-			HTTPTimeout:    time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
-			Threshold:      cfg.LoadAverageStrategy.Threshold,
-			DryRunOverride: r.dryRunNodeLoad,
+			Client:          client,
+			Cfg:             cfg,
+			PodLabel:        cfg.LoadAverageStrategy.PodLabel,
+			Namespace:       cfg.LoadAverageStrategy.Namespace,
+			HTTPPort:        cfg.LoadAverageStrategy.Port,
+			HTTPTimeout:     time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
+			Threshold:       cfg.LoadAverageStrategy.Threshold,
+			DryRunOverride:  r.dryRunNodeLoad,
+			IgnoreLabels:    cfg.IgnoreLabels,
+			ClusterEvalMode: strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 		})
 	}
 
