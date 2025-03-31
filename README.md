@@ -25,13 +25,15 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 - ✅ Pluggable scale-down strategies
 - ✅ Resource-aware scale-down (CPU/mem request + usage)
 - ✅ Load average-aware scale-down using `/proc/loadavg`
+- ✅ Cluster-wide load evaluation (average, median, or p90) in LoadAverageStrategy
 - ✅ Multi-strategy support with short-circuit logic
-- ✅ Dry-run mode for testing
+- ✅ Dry-run mode for testing, including cluster-level overrides
 - ✅ Cooldown tracking (global + per-node)
 - ✅ Metrics daemonset for per-node loadavg
 - ✅ Optional Helm chart for deployment
 - ✅ Compatible with Wake-on-LAN (for now, can be extended with IPMI etc)
 - ✅ Safe cordon and drain before shutdown
+- ✅ Comprehensive unit tests for LoadAverageStrategy and edge cases
 
 ---
 

@@ -15,8 +15,6 @@
 ---
 
 ## 🔧 In Progress / Next Up
-- Add cluster-wide load evaluation (average, median, or p90) to LoadAverageStrategy
-- Add unit tests for LoadAverageStrategy (global logic, edge cases)
 - Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
 - Expose metrics via `/metrics` endpoint (Prometheus scrape)
 - Refactor config loading in Helm chart (`.Values.config.*` directly passed to config.yaml)
