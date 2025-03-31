@@ -1,0 +1,26 @@
+name: Go CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Go 1.23.3 Tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go 1.23.3
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.23.3
+
+      - name: Run static analysis
+        run: go vet ./...
+
+      - name: Run tests with coverage
+        run: go test -v -cover ./...
