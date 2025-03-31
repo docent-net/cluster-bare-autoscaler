@@ -1,3 +1,5 @@
+![Go CI](https://github.com/docent-net/cluster-bare-autoscaler/actions/workflows/go-test.yaml/badge.svg)
+
 # Cluster Bare Autoscaler
 
 ## Introduction
