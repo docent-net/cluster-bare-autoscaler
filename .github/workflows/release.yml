@@ -3,7 +3,7 @@ name: Create Release on Tag
 on:
   push:
     tags:
-      - 'v*'  # Trigger only on tags starting with "v"
+      - '*'  # Trigger on all tag pushes
 
 permissions:
   contents: write
