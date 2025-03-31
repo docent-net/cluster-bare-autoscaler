@@ -18,17 +18,19 @@ import (
 )
 
 type LoadAverageScaleDown struct {
-	Client          kubernetes.Interface
-	Cfg             *config.Config
-	PodLabel        string
-	Namespace       string
-	HTTPPort        int
-	HTTPTimeout     time.Duration
-	Threshold       float64
-	DryRunOverride  *float64 // Optional CLI override for normalized load
-	ClusterEvalMode ClusterLoadEvalMode
-	IgnoreLabels    map[string]string
-	LoadFetcher     ClusterLoadFetcher
+	Client                    kubernetes.Interface
+	Cfg                       *config.Config
+	PodLabel                  string
+	Namespace                 string
+	HTTPPort                  int
+	HTTPTimeout               time.Duration
+	NodeThreshold             float64
+	ClusterWideThreshold      float64
+	DryRunNodeLoadOverride    *float64 // Optional CLI override for normalized load
+	DryRunClusterLoadOverride *float64 // as above, but for the cluster-wide load
+	ClusterEvalMode           ClusterLoadEvalMode
+	IgnoreLabels              map[string]string
+	LoadFetcher               ClusterLoadFetcher
 }
 
 type ClusterLoadFetcher interface {
@@ -59,43 +61,57 @@ var evalFuncs = map[ClusterLoadEvalMode]func([]float64) float64{
 }
 
 func (l *LoadAverageScaleDown) ShouldScaleDown(ctx context.Context, nodeName string) (bool, error) {
+	// Check node-local threshold first
 	normalized, err := l.getNormalizedLoadForNode(ctx, nodeName)
 	if err != nil {
 		return false, err
 	}
 
-	if normalized >= l.Threshold {
-		slog.Info("Node load too high to scale down", "node", nodeName, "normalizedLoad", normalized, "threshold", l.Threshold)
+	if normalized >= l.NodeThreshold {
+		slog.Info("Node load too high for scale-down", "node", nodeName, "load", normalized, "threshold", l.NodeThreshold)
 		return false, nil
 	}
 
-	if l.ClusterEvalMode != ClusterEvalNone {
-		clusterLoads, err := l.getEligibleClusterLoads(ctx, nodeName)
-		if err != nil || len(clusterLoads) == 0 {
-			slog.Warn("No cluster-wide load data available", "err", err)
-			return false, nil
-		}
-
-		aggregate := l.evaluateClusterAggregate(clusterLoads)
-		slog.Info("Cluster-wide load average",
-			"aggregate", aggregate,
-			"mode", l.ClusterEvalMode.String(),
-			"candidateLoad", normalized,
-		)
-
-		if normalized >= aggregate {
-			slog.Info("Node load is not below cluster-wide aggregate — skipping scale-down", "node", nodeName)
-			return false, nil
-		}
+	aggregate, err := l.getClusterAggregateLoad(ctx, nodeName)
+	if err != nil {
+		return false, nil
 	}
 
+	slog.Info("Cluster-wide load evaluation",
+		"aggregateLoad", aggregate,
+		"clusterWideThreshold", l.ClusterWideThreshold,
+		"evalMode", l.ClusterEvalMode,
+	)
+
+	if aggregate >= l.ClusterWideThreshold {
+		slog.Info("Cluster-wide load too high to scale down node", "aggregateLoad", aggregate, "threshold", l.ClusterWideThreshold)
+		return false, nil
+	}
+
+	// Both thresholds pass: safe to scale down
 	return true, nil
 }
 
+func (l *LoadAverageScaleDown) getClusterAggregateLoad(ctx context.Context, excludeNode string) (float64, error) {
+	if l.DryRunClusterLoadOverride != nil {
+		slog.Info("Dry-run override: using cluster-wide load", "value", *l.DryRunClusterLoadOverride)
+		return *l.DryRunClusterLoadOverride, nil
+	}
+
+	clusterLoads, err := l.getEligibleClusterLoads(ctx, excludeNode)
+	if err != nil || len(clusterLoads) == 0 {
+		slog.Warn("No eligible cluster load data available", "err", err)
+		return 0, fmt.Errorf("no cluster load data")
+	}
+
+	aggregate := l.evaluateClusterAggregate(clusterLoads)
+	return aggregate, nil
+}
+
 func (l *LoadAverageScaleDown) getNormalizedLoadForNode(ctx context.Context, nodeName string) (float64, error) {
-	if l.DryRunOverride != nil {
-		slog.Info("Dry-run override: using normalized load value", "node", nodeName, "value", *l.DryRunOverride)
-		return *l.DryRunOverride, nil
+	if l.DryRunNodeLoadOverride != nil {
+		slog.Info("Dry-run override: using normalized load value", "node", nodeName, "value", *l.DryRunNodeLoadOverride)
+		return *l.DryRunNodeLoadOverride, nil
 	}
 	return l.fetchNormalizedLoad(ctx, nodeName)
 }

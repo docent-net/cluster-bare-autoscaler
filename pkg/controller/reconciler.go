@@ -29,6 +29,7 @@ type Reconciler struct {
 	state             *NodeStateTracker
 	scaleDownStrategy strategy.ScaleDownStrategy
 	dryRunNodeLoad    *float64 // optional CLI override
+	dryRunClusterLoad *float64 // optional CLI override
 }
 
 type ReconcilerOption func(r *Reconciler)
@@ -70,16 +71,18 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 
 	if cfg.LoadAverageStrategy.Enabled {
 		strategies = append(strategies, &strategy.LoadAverageScaleDown{
-			Client:          client,
-			Cfg:             cfg,
-			PodLabel:        cfg.LoadAverageStrategy.PodLabel,
-			Namespace:       cfg.LoadAverageStrategy.Namespace,
-			HTTPPort:        cfg.LoadAverageStrategy.Port,
-			HTTPTimeout:     time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
-			Threshold:       cfg.LoadAverageStrategy.Threshold,
-			DryRunOverride:  r.dryRunNodeLoad,
-			IgnoreLabels:    cfg.IgnoreLabels,
-			ClusterEvalMode: strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
+			Client:                    client,
+			Cfg:                       cfg,
+			PodLabel:                  cfg.LoadAverageStrategy.PodLabel,
+			Namespace:                 cfg.LoadAverageStrategy.Namespace,
+			HTTPPort:                  cfg.LoadAverageStrategy.Port,
+			HTTPTimeout:               time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
+			NodeThreshold:             cfg.LoadAverageStrategy.NodeThreshold,
+			ClusterWideThreshold:      cfg.LoadAverageStrategy.ClusterWideThreshold,
+			DryRunNodeLoadOverride:    r.dryRunNodeLoad,
+			DryRunClusterLoadOverride: r.dryRunClusterLoad,
+			IgnoreLabels:              cfg.IgnoreLabels,
+			ClusterEvalMode:           strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 		})
 	}
 

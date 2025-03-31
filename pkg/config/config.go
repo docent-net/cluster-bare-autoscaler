@@ -32,13 +32,14 @@ type Config struct {
 }
 
 type LoadAverageStrategyConfig struct {
-	Enabled        bool    `yaml:"enabled"`
-	Threshold      float64 `yaml:"threshold"`
-	PodLabel       string  `yaml:"podLabel"`
-	Namespace      string  `yaml:"namespace"`
-	Port           int     `yaml:"port"`
-	TimeoutSeconds int     `yaml:"timeoutSeconds"`
-	ClusterEval    string  `yaml:"clusterEval,omitempty"` // "average", "median", or "p90"
+	Enabled              bool    `yaml:"enabled"`
+	NodeThreshold        float64 `yaml:"nodeThreshold"`
+	ClusterWideThreshold float64 `yaml:"clusterWideThreshold"`
+	PodLabel             string  `yaml:"podLabel"`
+	Namespace            string  `yaml:"namespace"`
+	Port                 int     `yaml:"port"`
+	TimeoutSeconds       int     `yaml:"timeoutSeconds"`
+	ClusterEval          string  `yaml:"clusterEval,omitempty"` // "average", "median", or "p90"
 }
 
 func Load(path string) (*Config, error) {

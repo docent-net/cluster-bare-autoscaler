@@ -11,11 +11,13 @@ ignoreLabels:
   node-home-assistant: yes
 loadAverageStrategy:
   enabled: true
-  threshold: 0.7
+  nodeThreshold: 0.7
+  clusterWideThreshold: 0.5
   podLabel: "app=cluster-bare-autoscaler-sysmetrics"
   namespace: "cluster-services"
   port: 9100
   timeoutSeconds: 3
+  clusterEval: p90
 nodes:
   - name: node2
     ip: 172.20.4.14

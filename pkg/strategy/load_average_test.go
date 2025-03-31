@@ -33,13 +33,13 @@ func newTestStrategy(t *testing.T, server *httptest.Server, pods []v1.Pod) *Load
 	clientset := corefake.NewSimpleClientset(toRuntimeObjects(pods)...)
 
 	return &LoadAverageScaleDown{
-		Client:         clientset,
-		Namespace:      "default",
-		PodLabel:       "app=test-metrics",
-		HTTPPort:       serverPortFromURL(server.URL),
-		HTTPTimeout:    time.Second,
-		Threshold:      0.5,
-		DryRunOverride: nil,
+		Client:                 clientset,
+		Namespace:              "default",
+		PodLabel:               "app=test-metrics",
+		HTTPPort:               serverPortFromURL(server.URL),
+		HTTPTimeout:            time.Second,
+		NodeThreshold:          0.5,
+		DryRunNodeLoadOverride: nil,
 	}
 }
 
@@ -60,10 +60,13 @@ func serverPortFromURL(url string) int {
 
 func TestDryRunOverride(t *testing.T) {
 	override := 0.3
-	strategy := &LoadAverageScaleDown{
-		DryRunOverride: &override,
-		Threshold:      0.5,
-	}
+
+	strategy := newTestStrategyWithDefaults(t, "dummy-node", func(s *LoadAverageScaleDown) {
+		s.DryRunNodeLoadOverride = &override
+		s.ClusterEvalMode = ClusterEvalAverage
+		s.ClusterWideThreshold = 0.5
+		s.DryRunClusterLoadOverride = ptr(0.3)
+	})
 
 	ok, err := strategy.ShouldScaleDown(context.Background(), "dummy-node")
 	if err != nil {
@@ -124,7 +127,7 @@ func TestShouldScaleDown_ClusterEvalAverage(t *testing.T) {
 	override := 0.4
 
 	strategy := newTestStrategyWithDefaults(t, "node1", func(s *LoadAverageScaleDown) {
-		s.DryRunOverride = &override
+		s.DryRunNodeLoadOverride = &override
 		s.ClusterEvalMode = ClusterEvalAverage
 		s.LoadFetcher = &mockFetcher{mockData: []float64{0.6, 0.5}} // avg = 0.55
 	})
@@ -142,7 +145,10 @@ func TestShouldScaleDown_DryRunOverrideWins(t *testing.T) {
 	override := 0.3
 
 	strategy := newTestStrategyWithDefaults(t, "node1", func(s *LoadAverageScaleDown) {
-		s.DryRunOverride = &override
+		s.DryRunNodeLoadOverride = &override
+		s.ClusterEvalMode = ClusterEvalAverage
+		s.ClusterWideThreshold = 0.5
+		s.DryRunClusterLoadOverride = ptr(0.3)
 	})
 
 	ok, err := strategy.ShouldScaleDown(context.Background(), "node1")
@@ -158,9 +164,9 @@ func TestShouldScaleDown_NoClusterData(t *testing.T) {
 	override := 0.3
 
 	strategy := newTestStrategyWithDefaults(t, "node1", func(s *LoadAverageScaleDown) {
-		s.DryRunOverride = &override
+		s.DryRunNodeLoadOverride = &override
 		s.ClusterEvalMode = ClusterEvalMedian
-		s.LoadFetcher = &mockFetcher{mockData: []float64{}} // Simulate no cluster data
+		s.DryRunClusterLoadOverride = ptr(0.0) // Simulate zero aggregate load
 	})
 
 	ok, err := strategy.ShouldScaleDown(context.Background(), "node1")
@@ -175,8 +181,8 @@ func TestShouldScaleDown_NoClusterData(t *testing.T) {
 func TestShouldScaleDown_ThresholdBlocks(t *testing.T) {
 	override := 1.0
 	strategy := &LoadAverageScaleDown{
-		DryRunOverride: &override,
-		Threshold:      0.5,
+		DryRunNodeLoadOverride: &override,
+		NodeThreshold:          0.5,
 	}
 
 	ok, err := strategy.ShouldScaleDown(context.Background(), "node1")
@@ -192,9 +198,11 @@ func newTestStrategyWithDefaults(t *testing.T, name string, opts ...func(*LoadAv
 	t.Helper()
 
 	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	peerNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name + "-peer"}}
+
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "metrics-pod",
+			Name:      "metrics-pod-" + name,
 			Namespace: "default",
 			Labels:    map[string]string{"app": "test-metrics"},
 		},
@@ -202,13 +210,23 @@ func newTestStrategyWithDefaults(t *testing.T, name string, opts ...func(*LoadAv
 		Status: v1.PodStatus{PodIP: "127.0.0.1"},
 	}
 
+	peerPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "metrics-pod-" + name + "-peer",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "test-metrics"},
+		},
+		Spec:   v1.PodSpec{NodeName: name + "-peer"},
+		Status: v1.PodStatus{PodIP: "127.0.0.1"},
+	}
+
 	strategy := &LoadAverageScaleDown{
-		Client:          corefake.NewSimpleClientset(node, pod),
+		Client:          corefake.NewSimpleClientset(node, peerNode, pod, peerPod),
 		Namespace:       "default",
 		PodLabel:        "app=test-metrics",
 		HTTPPort:        9100,
 		HTTPTimeout:     1 * time.Second,
-		Threshold:       0.5,
+		NodeThreshold:   0.5,
 		ClusterEvalMode: ClusterEvalNone,
 		IgnoreLabels:    map[string]string{},
 	}
@@ -243,13 +261,13 @@ func newServerBackedStrategy(t *testing.T, nodeName string, handler http.Handler
 	})
 
 	return &LoadAverageScaleDown{
-		Client:         clientset,
-		Namespace:      "default",
-		PodLabel:       "app=test-metrics",
-		HTTPPort:       serverPortFromURL(server.URL),
-		HTTPTimeout:    1 * time.Second,
-		Threshold:      0.5,
-		DryRunOverride: nil,
+		Client:                 clientset,
+		Namespace:              "default",
+		PodLabel:               "app=test-metrics",
+		HTTPPort:               serverPortFromURL(server.URL),
+		HTTPTimeout:            1 * time.Second,
+		NodeThreshold:          0.5,
+		DryRunNodeLoadOverride: nil,
 	}
 }
 
@@ -318,4 +336,39 @@ func TestAggregationFunctions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestShouldScaleDown_ClusterWideThresholdBlocks(t *testing.T) {
+	override := 0.3
+
+	strategy := newTestStrategyWithDefaults(t, "node1", func(s *LoadAverageScaleDown) {
+		s.DryRunNodeLoadOverride = &override
+		s.NodeThreshold = 0.5
+		s.ClusterWideThreshold = 0.4
+		s.ClusterEvalMode = ClusterEvalAverage
+		s.DryRunClusterLoadOverride = ptr(0.55) // aggregate = 0.55 (too high)
+	})
+
+	ok, err := strategy.ShouldScaleDown(context.Background(), "node1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Errorf("expected scale-down to be denied due to high cluster-wide load (0.55 >= 0.4)")
+	}
+
+	// Now test passing cluster-wide threshold
+	strategy.DryRunClusterLoadOverride = ptr(0.25) // aggregate = 0.25 (ok)
+
+	ok, err = strategy.ShouldScaleDown(context.Background(), "node1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected scale-down to be allowed (0.25 < 0.4)")
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
