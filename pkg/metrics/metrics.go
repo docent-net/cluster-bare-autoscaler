@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 )
@@ -37,6 +38,10 @@ var (
 			Help: "Number of eviction failures during drain",
 		},
 	)
+	PoweredOffNodes = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cba_powered_off_nodes",
+		Help: "Number of nodes currently marked as powered off",
+	}, []string{"node"})
 )
 
 func Init() {

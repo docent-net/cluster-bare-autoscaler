@@ -29,6 +29,8 @@ type Config struct {
 	BootstrapCooldownSeconds int  `yaml:"bootstrapCooldownSeconds"`
 
 	LoadAverageStrategy LoadAverageStrategyConfig `yaml:"loadAverageStrategy"`
+	ShutdownManager     ShutdownManagerConfig     `yaml:"shutdownManager"`
+	ShutdownMode        string                    `yaml:"shutdownMode"` // supported: "http", "disabled"
 }
 
 type LoadAverageStrategyConfig struct {
@@ -40,6 +42,13 @@ type LoadAverageStrategyConfig struct {
 	Port                 int     `yaml:"port"`
 	TimeoutSeconds       int     `yaml:"timeoutSeconds"`
 	ClusterEval          string  `yaml:"clusterEval,omitempty"` // "average", "median", or "p90"
+}
+
+type ShutdownManagerConfig struct {
+	Port         int    `yaml:"port"`
+	Namespace    string `yaml:"namespace"`
+	PodLabel     string `yaml:"podLabel"`
+	ShutdownMode string `yaml:"shutDownMode"`
 }
 
 func Load(path string) (*Config, error) {

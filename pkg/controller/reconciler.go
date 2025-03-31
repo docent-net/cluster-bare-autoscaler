@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	policyv1 "k8s.io/api/policy/v1"
@@ -14,6 +15,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
@@ -21,6 +23,8 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/power"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/strategy"
 )
+
+const annotationPoweredOff = "cba.dev/was-powered-off"
 
 type Reconciler struct {
 	cfg               *config.Config
@@ -39,7 +43,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 		cfg:    cfg,
 		client: client,
 		state:  NewNodeStateTracker(),
-		power:  &power.LogPowerController{DryRun: cfg.DryRun},
+		power:  newPowerController(cfg, client),
 	}
 
 	// Apply options
@@ -93,8 +97,26 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 	slog.Info("Configured scale-down strategy chain", "strategies", names)
 
 	r.scaleDownStrategy = &strategy.MultiStrategy{Strategies: strategies}
+	r.restorePoweredOffState(context.Background())
 
 	return r
+}
+
+func newPowerController(cfg *config.Config, client *kubernetes.Clientset) power.PowerController {
+	switch cfg.ShutdownMode {
+	case power.ShutdownModeDisabled:
+		return &power.NoopPowerController{}
+	case power.ShutdownModeHTTP:
+		return &power.ShutdownHTTPController{
+			DryRun:    cfg.DryRun,
+			Port:      cfg.ShutdownManager.Port,
+			Namespace: cfg.ShutdownManager.Namespace,
+			PodLabel:  cfg.ShutdownManager.PodLabel,
+			Client:    client,
+		}
+	default:
+		return &power.LogPowerController{DryRun: cfg.DryRun}
+	}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -124,6 +146,30 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	r.maybeScaleUp(ctx)
 	return nil
+}
+
+func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
+	nodeList, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		slog.Warn("Failed to list nodes while restoring powered-off state", "err", err)
+		return
+	}
+
+	// Build a map of currently running nodes
+	active := make(map[string]struct{})
+	for _, node := range nodeList.Items {
+		active[node.Name] = struct{}{}
+	}
+
+	for _, nodeCfg := range r.cfg.Nodes {
+		if nodeCfg.Disabled {
+			continue
+		}
+		if _, found := active[nodeCfg.Name]; !found {
+			slog.Info("Node from config not found in cluster — assuming powered off", "node", nodeCfg.Name)
+			r.state.MarkPoweredOff(nodeCfg.Name)
+		}
+	}
 }
 
 func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []v1.Node {
@@ -165,6 +211,8 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) {
 			} else {
 				slog.Info("Scale-up triggered", "node", nodeCfg.Name)
 				r.state.ClearPoweredOff(nodeCfg.Name)
+				_ = r.clearPoweredOffAnnotation(ctx, nodeCfg.Name)
+				metrics.PoweredOffNodes.WithLabelValues(nodeCfg.Name).Set(0)
 			}
 
 			break // one per loop
@@ -213,6 +261,7 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		} else {
 			slog.Info("Shutdown initiated", "node", candidate.Name)
 			metrics.ShutdownSuccesses.Inc()
+			metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
 			r.state.MarkGlobalShutdown()
 		}
 	}
@@ -220,9 +269,25 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 	if !r.cfg.DryRun {
 		r.state.MarkShutdown(candidate.Name)
 		r.state.MarkPoweredOff(candidate.Name)
+
+		if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
+			slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
+		}
 	}
 
 	return true
+}
+
+func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, nodeName string) error {
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"true"}}}`, annotationPoweredOff))
+	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName string) error {
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, annotationPoweredOff))
+	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
 }
 
 func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
@@ -237,6 +302,11 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 			}
 		}
 		if !skip {
+			if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
+				slog.Info("Skipping node marked as powered-off (annotation)", "node", node.Name)
+				continue
+			}
+
 			if node.Spec.Unschedulable {
 				slog.Info("Skipping node because it is already cordoned", "node", node.Name)
 				continue

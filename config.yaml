@@ -1,6 +1,6 @@
 logLevel: debug
 minNodes: 7
-cooldown: 5m
+cooldown: 60m
 pollInterval: 10s
 dryRun:
 resourceBufferCPUPerc: 5
@@ -18,6 +18,11 @@ loadAverageStrategy:
   port: 9100
   timeoutSeconds: 3
   clusterEval: p90
+shutdownManager:
+  port: 9101
+  namespace: cluster-services
+  podLabel: cluster-bare-autoscaler-poweroff-manager
+shutDownMode: "http"
 nodes:
   - name: node2
     ip: 172.20.4.14

@@ -40,3 +40,46 @@ spec:
       nodeSelector:
         {{- toYaml .Values.metricsDaemonset.nodeSelector | nindent 8 }}
 {{- end }}
+---
+{{- if .Values.shutdownDaemonset.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cluster-bare-autoscaler.name" . }}-poweroff-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ include "cluster-bare-autoscaler.name" . }}-poweroff-manager
+    {{- with .Values.shutdownDaemonset.podLabels }}
+    {{ toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "cluster-bare-autoscaler.name" . }}-poweroff-manager
+  template:
+    metadata:
+      labels:
+        app: {{ include "cluster-bare-autoscaler.name" . }}-poweroff-manager
+        {{- with .Values.shutdownDaemonset.podLabels }}
+        {{ toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      hostPID: true
+      containers:
+        - name: poweroff-manager
+          image: "{{ .Values.shutdownDaemonset.image.repository }}:{{ .Values.shutdownDaemonset.image.tag }}"
+          imagePullPolicy: {{ .Values.shutdownDaemonset.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.shutdownDaemonset.port }}
+          resources:
+            {{- toYaml .Values.shutdownDaemonset.resources | nindent 12 }}
+          securityContext:
+            privileged: true  # Required for systemctl
+      priorityClassName: {{ .Values.shutdownDaemonset.priorityClassName }}
+      imagePullSecrets:
+        {{- toYaml .Values.shutdownDaemonset.imagePullSecrets | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.shutdownDaemonset.tolerations | nindent 8 }}
+      nodeSelector:
+        {{- toYaml .Values.shutdownDaemonset.nodeSelector | nindent 8 }}
+{{- end }}

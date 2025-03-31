@@ -1,17 +1,5 @@
 # TODO for Cluster Bare Autoscaler
 
-## ✅ Completed (recent)
-- Core scale-down logic (cordon, drain, shutdown)
-- Global and per-node cooldown logic
-- ResourceAware strategy with CPU/memory requests + usage
-- LoadAverage strategy based on DaemonSet metrics `/proc/loadavg`
-- Strategy chaining with short-circuiting
-- CLI dry-run override for node load (`--dry-run-node-load`)
-- Basic Prometheus-style metrics collection
-- Helm chart with flexible configuration
-- Metrics DaemonSet with custom labels and tolerations
-- Makefile and multi-arch `ko` image builds
-
 ---
 
 ## 🔧 In Progress / Next Up

@@ -45,6 +45,23 @@ metricsDaemonset:
   nodeSelector: {}
   podLabels: {}
 
+shutdownDaemonset:
+  enabled: true
+  port: 9101
+  image:
+    repository: docent/poweroff-manager
+    tag: v0.1.0
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  priorityClassName: "system-cluster-critical"
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+  tolerations: []
+  nodeSelector: {}
+  podLabels: {}
+
 config:
   logLevel: debug
   pollInterval: 10s
