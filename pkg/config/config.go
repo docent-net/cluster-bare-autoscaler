@@ -45,10 +45,9 @@ type LoadAverageStrategyConfig struct {
 }
 
 type ShutdownManagerConfig struct {
-	Port         int    `yaml:"port"`
-	Namespace    string `yaml:"namespace"`
-	PodLabel     string `yaml:"podLabel"`
-	ShutdownMode string `yaml:"shutDownMode"`
+	Port      int    `yaml:"port"`
+	Namespace string `yaml:"namespace"`
+	PodLabel  string `yaml:"podLabel"`
 }
 
 func Load(path string) (*Config, error) {

@@ -9,7 +9,7 @@ import (
 )
 
 func NewPowerControllerFromConfig(cfg *config.Config, client *kubernetes.Clientset) (PowerController, error) {
-	switch cfg.ShutdownManager.ShutdownMode {
+	switch cfg.ShutdownMode {
 	case ShutdownModeDisabled:
 		return &NoopPowerController{}, nil
 	case ShutdownModeHTTP:
@@ -21,6 +21,6 @@ func NewPowerControllerFromConfig(cfg *config.Config, client *kubernetes.Clients
 			Client:    client,
 		}, nil
 	default:
-		return nil, fmt.Errorf("unknown shutdown mode: %s", cfg.ShutdownManager.ShutdownMode)
+		return nil, fmt.Errorf("unknown shutdown mode: %s", cfg.ShutdownMode)
 	}
 }

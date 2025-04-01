@@ -21,7 +21,7 @@ loadAverageStrategy:
 shutdownManager:
   port: 9101
   namespace: cluster-services
-  podLabel: cluster-bare-autoscaler-poweroff-manager
+  podLabel: cluster-bare-autoscaler-poweroffshutDownMode-manager
 shutDownMode: "http"
 nodes:
   - name: node2
