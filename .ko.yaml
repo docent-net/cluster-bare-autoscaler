@@ -1,16 +1,13 @@
 defaultBaseImage: cgr.dev/chainguard/static:latest
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
 
 builds:
-  default:
-    id: cluster-bare-autoscaler
-    dir: .
-    env:
-    - CGO_ENABLED=0
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    tags:
-      - latest
-    ldflags:
-      - "-s -w"
-      - -X cmd.version={{ .Git.Tag }} -X cmd.date={{ .Git.CommitTimestamp }} -X cmd.commit={{ .Git.FullCommit }}
+- id: cluster-bare-autoscaler
+  dir: .
+  env:
+  - CGO_ENABLED=0
+  ldflags:
+    - "-s -w"
+    - -X cmd.version={{ .Git.Tag }} -X cmd.date={{ .Git.CommitTimestamp }} -X cmd.commit={{ .Git.FullCommit }}

@@ -42,7 +42,7 @@ build_image: build_binary
 
 .PHONY: build_and_publish_image
 build_and_publish_image:
-	KO_DOCKER_REPO=$(IMAGE_NAME) ko publish --tags=$(TAG) --platform=linux/amd64,linux/arm64 --bare
+	KO_DOCKER_REPO=$(IMAGE_NAME) ko publish --tags=$(TAG) --bare
 
 .PHONY: clean
 clean:
