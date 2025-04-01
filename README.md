@@ -32,11 +32,8 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 - ✅ Metrics daemonset for per-node loadavg
 - ✅ Nodes marked with `cba.dev/was-powered-off: true` are excluded from scaling 
     logic until manually cleared or rebooted via CBA."
-- ✅ Manual reboot requires annotation cleanup.
-- ✅ Optional Helm chart for deployment
 - ✅ Compatible with Wake-on-LAN (for now, can be extended with IPMI etc)
 - ✅ Safe cordon and drain before shutdown
-- ✅ Comprehensive unit tests for LoadAverageStrategy and edge cases
 
 ---
 
