@@ -268,14 +268,22 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 }
 
 func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, nodeName string) error {
-	slog.Debug("Annotating node as powered off", "node", nodeName, "annotation", annotationPoweredOff)
+	if r.cfg.DryRun {
+		slog.Debug("Dry-run: would annotate node as powered-off", "node", nodeName)
+		return nil
+	}
+	slog.Debug("Annotating node as powered-off", "node", nodeName)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"true"}}}`, annotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 
 func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName string) error {
-	slog.Debug("Clearing powered-off annotation from node", "node", nodeName, "annotation", annotationPoweredOff)
+	if r.cfg.DryRun {
+		slog.Debug("Dry-run: would clear powered-off annotation", "node", nodeName)
+		return nil
+	}
+	slog.Debug("Clearing powered-off annotation", "node", nodeName)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, annotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err

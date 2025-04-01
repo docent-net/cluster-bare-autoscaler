@@ -64,17 +64,26 @@ spec:
         {{ toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      hostPID: true
       containers:
         - name: poweroff-manager
           image: "{{ .Values.shutdownDaemonset.image.repository }}:{{ .Values.shutdownDaemonset.image.tag }}"
           imagePullPolicy: {{ .Values.shutdownDaemonset.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.shutdownDaemonset.port }}
+          volumeMounts:
+            - name: shutdown-socket
+              mountPath: {{ .Values.shutdownDaemonset.socketActivationPath }}
+              readOnly: true
           resources:
             {{- toYaml .Values.shutdownDaemonset.resources | nindent 12 }}
           securityContext:
-            privileged: true  # Required for systemctl
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: shutdown-socket
+          hostPath:
+            path: /run/cba-shutdown.sock
+            type: Socket
       priorityClassName: {{ .Values.shutdownDaemonset.priorityClassName }}
       imagePullSecrets:
         {{- toYaml .Values.shutdownDaemonset.imagePullSecrets | nindent 8 }}

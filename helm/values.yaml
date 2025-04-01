@@ -61,6 +61,7 @@ shutdownDaemonset:
   tolerations: []
   nodeSelector: {}
   podLabels: {}
+  socketActivationPath: /run/cba-shutdown.sock
 
 config:
   logLevel: debug
