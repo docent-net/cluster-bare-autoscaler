@@ -25,7 +25,7 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 - ✅ Pluggable scale-down strategies
 - ✅ Resource-aware scale-down (CPU/mem request + usage)
 - ✅ Load average-aware scale-down using `/proc/loadavg`
-- ✅ Cluster-wide load evaluation (average, median, or p90) in LoadAverageStrategy
+- ✅ Cluster-wide load evaluation (average, median, p90, p75) in LoadAverageStrategy
 - ✅ Multi-strategy support with short-circuit logic
 - ✅ Dry-run mode for testing, including cluster-level overrides
 - ✅ Cooldown tracking (global + per-node)

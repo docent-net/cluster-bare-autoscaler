@@ -297,19 +297,25 @@ func TestAggregationFunctions(t *testing.T) {
 			expected: 2.5,
 		},
 		{
-			name:     "P90 rounded down",
+			name:     "P90 typical case",
 			fn:       p90,
 			input:    []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-			expected: 10.0,
+			expected: 9.1,
 		},
 		{
 			name:     "P90 short list",
 			fn:       p90,
 			input:    []float64{10, 20, 30},
-			expected: 30.0, // 90th percentile of 3 values is the last one
+			expected: 28.0,
 		},
 		{
-			name:     "Empty input returns 0",
+			name:     "P75 typical case",
+			fn:       p75,
+			input:    []float64{10, 20, 30, 40},
+			expected: 32.5,
+		},
+		{
+			name:     "Empty input returns 0 (average)",
 			fn:       average,
 			input:    []float64{},
 			expected: 0,
@@ -323,6 +329,12 @@ func TestAggregationFunctions(t *testing.T) {
 		{
 			name:     "Empty input returns 0 (p90)",
 			fn:       p90,
+			input:    []float64{},
+			expected: 0,
+		},
+		{
+			name:     "Empty input returns 0 (p75)",
+			fn:       p75,
 			input:    []float64{},
 			expected: 0,
 		},

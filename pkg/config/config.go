@@ -41,7 +41,7 @@ type LoadAverageStrategyConfig struct {
 	Namespace            string  `yaml:"namespace"`
 	Port                 int     `yaml:"port"`
 	TimeoutSeconds       int     `yaml:"timeoutSeconds"`
-	ClusterEval          string  `yaml:"clusterEval,omitempty"` // "average", "median", or "p90"
+	ClusterEval          string  `yaml:"clusterEval,omitempty"` // "average", "median", "p90", "p75"
 }
 
 type ShutdownManagerConfig struct {

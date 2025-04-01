@@ -17,7 +17,7 @@ loadAverageStrategy:
   namespace: "cluster-services"
   port: 9100
   timeoutSeconds: 3
-  clusterEval: p90
+  clusterEval: p75
 shutdownManager:
   port: 9101
   namespace: cluster-services

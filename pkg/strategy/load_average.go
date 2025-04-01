@@ -52,12 +52,14 @@ const (
 	ClusterEvalAverage ClusterLoadEvalMode = "average"
 	ClusterEvalMedian  ClusterLoadEvalMode = "median"
 	ClusterEvalP90     ClusterLoadEvalMode = "p90"
+	ClusterEvalP75     ClusterLoadEvalMode = "p75"
 )
 
 var evalFuncs = map[ClusterLoadEvalMode]func([]float64) float64{
 	ClusterEvalAverage: average,
 	ClusterEvalMedian:  median,
 	ClusterEvalP90:     p90,
+	ClusterEvalP75:     p75,
 }
 
 func (l *LoadAverageScaleDown) ShouldScaleDown(ctx context.Context, nodeName string) (bool, error) {
@@ -228,29 +230,41 @@ func average(values []float64) float64 {
 }
 
 func median(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sorted := append([]float64{}, values...)
-	sort.Float64s(sorted)
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 0 {
-		return (sorted[mid-1] + sorted[mid]) / 2
-	}
-	return sorted[mid]
+	return percentile(values, 0.5)
 }
 
-func p90(values []float64) float64 {
+// percentile returns the value at the given percentile (0.0 - 1.0) using linear interpolation.
+func percentile(values []float64, p float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
+	if p < 0 || p > 1 {
+		panic("percentile p must be between 0.0 and 1.0")
+	}
+
 	sorted := append([]float64{}, values...)
 	sort.Float64s(sorted)
-	idx := int(float64(len(sorted)) * 0.9)
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
+
+	pos := p * float64(len(sorted)-1)
+	lower := int(pos)
+	upper := lower + 1
+
+	if upper >= len(sorted) {
+		return sorted[lower]
 	}
-	return sorted[idx]
+
+	weight := pos - float64(lower)
+	return sorted[lower]*(1-weight) + sorted[upper]*weight
+}
+
+// p90 returns the 90th percentile.
+func p90(values []float64) float64 {
+	return percentile(values, 0.9)
+}
+
+// p75 returns the 75th percentile.
+func p75(values []float64) float64 {
+	return percentile(values, 0.75)
 }
 
 func shouldIgnoreNode(node v1.Node, ignoreLabels map[string]string) bool {
@@ -272,6 +286,8 @@ func ParseClusterEvalMode(mode string) ClusterLoadEvalMode {
 		return ClusterEvalMedian
 	case "p90":
 		return ClusterEvalP90
+	case "p75":
+		return ClusterEvalP75
 	default:
 		return ClusterEvalAverage
 	}
