@@ -43,7 +43,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 		cfg:    cfg,
 		client: client,
 		state:  NewNodeStateTracker(),
-		power:  newPowerController(cfg, client),
+		power:  power.NewPowerControllerFromConfig(cfg, client),
 	}
 
 	// Apply options
@@ -100,24 +100,6 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 	r.restorePoweredOffState(context.Background())
 
 	return r
-}
-
-func newPowerController(cfg *config.Config, client *kubernetes.Clientset) power.PowerController {
-	switch cfg.ShutdownMode {
-	case power.ShutdownModeDisabled:
-		return &power.NoopPowerController{}
-	case power.ShutdownModeHTTP:
-		return &power.ShutdownHTTPController{
-			DryRun:    cfg.DryRun,
-			Port:      cfg.ShutdownManager.Port,
-			Namespace: cfg.ShutdownManager.Namespace,
-			PodLabel:  cfg.ShutdownManager.PodLabel,
-			Client:    client,
-		}
-	default:
-		slog.Warn("Unknown shutdown mode; falling back to noop", "mode", cfg.ShutdownMode)
-		return &power.NoopPowerController{}
-	}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -248,6 +230,9 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 
 		if err := r.cordonAndDrain(ctx, candidate); err != nil {
 			slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
+			if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+				slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
+			}
 			return false
 		}
 	}
@@ -259,6 +244,9 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		metrics.ShutdownAttempts.Inc()
 		if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
 			slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
+			if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+				slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
+			}
 		} else {
 			slog.Info("Shutdown initiated", "node", candidate.Name)
 			metrics.ShutdownSuccesses.Inc()
@@ -280,12 +268,14 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 }
 
 func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, nodeName string) error {
+	slog.Debug("Annotating node as powered off", "node", nodeName, "annotation", annotationPoweredOff)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"true"}}}`, annotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 
 func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName string) error {
+	slog.Debug("Clearing powered-off annotation from node", "node", nodeName, "annotation", annotationPoweredOff)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, annotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
