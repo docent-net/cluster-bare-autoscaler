@@ -22,18 +22,29 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 
 ## Features
 
-- ✅ Pluggable scale-down strategies
+- ✅ Pluggable scale-down **and scale-up** strategies
 - ✅ Resource-aware scale-down (CPU/mem request + usage)
 - ✅ Load average-aware scale-down using `/proc/loadavg`
 - ✅ Cluster-wide load evaluation (average, median, p90, p75) in LoadAverageStrategy
-- ✅ Multi-strategy support with short-circuit logic
-- ✅ Dry-run mode for testing, including cluster-level overrides
-- ✅ Cooldown tracking (global + per-node)
-- ✅ Metrics daemonset for per-node loadavg
-- ✅ Nodes marked with `cba.dev/was-powered-off: true` are excluded from scaling 
-    logic until manually cleared or rebooted via CBA."
-- ✅ Compatible with Wake-on-LAN (for now, can be extended with IPMI etc)
+- ✅ **MinNodeCount-based scale-up** to maintain minimum node count
+- ✅ Multi-strategy chaining (short-circuit logic)
+- ✅ Dry-run mode for testing, with CLI overrides
+- ✅ Cooldown tracking (global + per-node boot/shutdown)
+- ✅ Nodes marked with `cba.dev/was-powered-off: true` or `.Disabled` are ignored
 - ✅ Safe cordon and drain before shutdown
+- ✅ Wake-on-LAN support for bare-metal power-on
+
+## Additional, optionable services
+
+- ✅ Metrics DaemonSet for per-node load average via `/proc/loadavg`
+- ✅ Power-off DaemonSet for secure node shutdown via systemd socket activation
+- ✅ Wake-on-LAN agent (wol-agent) for powering nodes via HTTP-triggered magic packets
+- 
+---
+
+## Metrics
+
+The autoscaler exposes Prometheus metrics on port `:9090` at the `/metrics` endpoint. Metrics include evaluation counts, shutdown attempts/successes, eviction failures, and per-node powered-off status.
 
 ---
 

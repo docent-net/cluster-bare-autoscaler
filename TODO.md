@@ -1,24 +1,18 @@
 # TODO for Cluster Bare Autoscaler
 
 ## 🔧 In Progress / Next Up
-- Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
-- Expose metrics via `/metrics` endpoint (Prometheus scrape)
-- Refactor config loading in Helm chart (`.Values.config.*` directly passed to config.yaml)
+- Cluster-wide strategy in the ScaleUp chain: load evaluation (average, median, p90, p75) 
+- ScaleUp trigger based on unschedulable pod events (e.g., from K8s scheduler)
 
 ## 📌 Planned / Backlog
-- Implement real ScaleUp strategy (currently placeholder)
+- Alternative metrics agent using eBPF (instead of HTTP DaemonSet)
+- Per-strategy Prometheus metrics
+- Integration tests: simulate multi-node scenarios with mocks/fakes
+- CLI enhancements: add usage examples, better validation
+- Helm chart: registry override, versioning, optional ServiceMonitor
+- Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
+- Refactor config loading in Helm chart (`.Values.config.*` passed to config.yaml)
+- Strategy debug tracing: per-strategy logs for denied scale-down
+- Add more spans to tracing
 - Optional randomized polling interval to prevent thundering herd
-- Strategy debug logging: report which strategy blocked scale-down
-- Force node shutdown if repeated drain failures occur
-- Build-time metadata injection (`-ldflags`) for version, commit, etc.
-  -- Add GitHub Actions for lint/test/build/publish
-- Optional alternative metrics collection via eBPF (future idea)
-- Configurable image registry + repo in Helm (not hardcoded to Docker Hub)
-- Optional ServiceMonitor support for metrics
-- CLI help/usage enhancements with examples
-- Optionally detect pod eviction stuck conditions
-
----
-
-Feel free to contribute! Open issues or PRs welcome.
-
+- Detect pod eviction stuck conditions
