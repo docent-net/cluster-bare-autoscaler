@@ -8,9 +8,10 @@ import (
 )
 
 type NodeConfig struct {
-	Name     string `yaml:"name"`
-	IP       string `yaml:"ip"`
-	Disabled bool   `yaml:"disabled,omitempty"`
+	Name       string `yaml:"name"`
+	IP         string `yaml:"ip"`
+	Disabled   bool   `yaml:"disabled,omitempty"`
+	WOLMacAddr string `yaml:"wolMacAddr,omitempty"`
 }
 
 type Config struct {
@@ -18,6 +19,7 @@ type Config struct {
 
 	MinNodes     int               `yaml:"minNodes"`
 	Cooldown     time.Duration     `yaml:"cooldown"`
+	BootCooldown time.Duration     `yaml:"bootCooldown"`
 	PollInterval time.Duration     `yaml:"pollInterval"`
 	IgnoreLabels map[string]string `yaml:"ignoreLabels"`
 	Nodes        []NodeConfig      `yaml:"nodes"`
@@ -31,6 +33,11 @@ type Config struct {
 	LoadAverageStrategy LoadAverageStrategyConfig `yaml:"loadAverageStrategy"`
 	ShutdownManager     ShutdownManagerConfig     `yaml:"shutdownManager"`
 	ShutdownMode        string                    `yaml:"shutdownMode"` // supported: "http", "disabled"
+
+	PowerOnMode       string         `yaml:"powerOnMode"` // "disabled", "wol"
+	WOLBroadcastAddr  string         `yaml:"wolBroadcastAddr"`
+	WOLBootTimeoutSec int            `yaml:"wolBootTimeoutSeconds"`
+	WolAgent          WolAgentConfig `yaml:"wolAgent"`
 }
 
 type LoadAverageStrategyConfig struct {
@@ -45,6 +52,12 @@ type LoadAverageStrategyConfig struct {
 }
 
 type ShutdownManagerConfig struct {
+	Port      int    `yaml:"port"`
+	Namespace string `yaml:"namespace"`
+	PodLabel  string `yaml:"podLabel"`
+}
+type WolAgentConfig struct {
+	Enabled   bool   `yaml:"enabled"`
 	Port      int    `yaml:"port"`
 	Namespace string `yaml:"namespace"`
 	PodLabel  string `yaml:"podLabel"`

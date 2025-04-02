@@ -1,47 +1,52 @@
 logLevel: debug
-minNodes: 7
+minNodes: 3
 cooldown: 60m
-pollInterval: 10s
+bootCooldown: 360m
+pollInterval: 60s
 dryRun:
-resourceBufferCPUPerc: 5
-resourceBufferMemoryPerc: 5
-bootstrapCooldownSeconds: 3
+resourceBufferCPUPerc: 10
+resourceBufferMemoryPerc: 10
+bootstrapCooldownSeconds: 30
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
-  node-home-assistant: yes
+  ignore-this-node: yes
 loadAverageStrategy:
   enabled: true
   nodeThreshold: 0.7
   clusterWideThreshold: 0.5
   podLabel: "app=cluster-bare-autoscaler-sysmetrics"
-  namespace: "cluster-services"
+  namespace: cluster-bare-autoscaler
   port: 9100
   timeoutSeconds: 3
   clusterEval: p75
 shutdownManager:
   port: 9101
-  namespace: cluster-services
-  podLabel: cluster-bare-autoscaler-poweroffshutDownMode-manager
+  namespace: cluster-bare-autoscaler
+  podLabel: cluster-bare-autoscaler-poweroff-manager
 shutdownMode: "http"
+
+powerOnMode: "wol"
+wolBroadcastAddr: 192.168.0.255
+wolBootTimeoutSeconds: 600 # 10mins
+wolAgent:
+  enabled: true
+  port: 9102
+  namespace: cluster-bare-autoscaler
+  podLabel: cluster-bare-autoscaler-wol-agent
+
 nodes:
-  - name: node2
-    ip: 172.20.4.14
-  - name: node3
-    ip: 172.20.4.15
-  - name: node4
-    ip: 172.20.4.16
-#    disabled: true
-  - name: node5
-    ip: 172.20.4.17
-  - name: node14
-    ip: 172.20.4.20
-  - name: node16
-    ip: 172.20.4.22
-  - name: node17
-    ip: 172.20.4.23
-  - name: node18
-    ip: 172.20.4.24
-  - name: node19
-    ip: 172.20.4.25
-  - name: node22
-    ip: 172.20.4.21
+  - name: workernode1
+    ip: 192.168.0.10
+    wolMacAddr: xx:xx:xx:xx:xx:xx
+  - name: workernode2
+    ip: 192.168.0.11
+    wolMacAddr: xx:xx:xx:xx:xx:xx
+  - name: workernode3
+    ip: 192.168.0.12
+    wolMacAddr: xx:xx:xx:xx:xx:xx
+  - name: workernode4
+    ip: 192.168.0.13
+    wolMacAddr: xx:xx:xx:xx:xx:xx
+  - name: workernode5
+    ip: 192.168.0.14
+    wolMacAddr: xx:xx:xx:xx:xx:xx

@@ -114,7 +114,8 @@ func TestCooldownExclusion(t *testing.T) {
 
 	node := makeNode("node1", nil)
 	state.MarkShutdown("node1")
-	state.recentlyShutdown["node1"] = time.Now().Add(-1 * time.Minute)
+	// Simulate recent shutdown 1 minute ago
+	state.shutdownTimestamps["node1"] = time.Now().Add(-1 * time.Minute)
 
 	nodes := []v1.Node{node}
 	eligible := r.getEligibleNodes(nodes)

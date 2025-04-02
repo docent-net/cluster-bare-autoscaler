@@ -38,8 +38,10 @@ metricsDaemonset:
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
   resources:
+    limits:
+      memory: 32Mi
     requests:
-      cpu: 10m
+      cpu: 8m
       memory: 20Mi
   tolerations: []
   nodeSelector: {}
@@ -55,13 +57,32 @@ shutdownDaemonset:
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
   resources:
+    limits:
+      memory: 32Mi
     requests:
       cpu: 10m
-      memory: 20Mi
+      memory: 8Mi
   tolerations: []
   nodeSelector: {}
   podLabels: {}
   socketActivationPath: /run/cba-shutdown.sock
+
+wolAgent:
+  enabled: true
+  port: 9102
+  image:
+    repository:  docent/wol-agent
+    tag: 0.1.0
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  priorityClassName: "system-cluster-critical"
+  resources:
+    limits:
+      memory: 32Mi
+    requests:
+      cpu: 10m
+      memory: 8Mi
+  tolerations: []
 
 config:
   logLevel: debug

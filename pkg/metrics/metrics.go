@@ -8,31 +8,31 @@ import (
 )
 
 var (
-	Evaluations = prometheus.NewCounter(
+	Evaluations = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "autoscaler_evaluation_total",
 			Help: "Number of reconcile loops run",
 		},
 	)
-	ScaleDowns = prometheus.NewCounter(
+	ScaleDowns = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "autoscaler_scale_down_total",
 			Help: "Number of nodes selected for scale-down",
 		},
 	)
-	ShutdownAttempts = prometheus.NewCounter(
+	ShutdownAttempts = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "autoscaler_shutdown_attempts_total",
 			Help: "Number of node shutdown attempts",
 		},
 	)
-	ShutdownSuccesses = prometheus.NewCounter(
+	ShutdownSuccesses = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "autoscaler_shutdown_success_total",
 			Help: "Number of successful node shutdowns",
 		},
 	)
-	EvictionFailures = prometheus.NewCounter(
+	EvictionFailures = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "autoscaler_eviction_failures_total",
 			Help: "Number of eviction failures during drain",
@@ -42,10 +42,17 @@ var (
 		Name: "cba_powered_off_nodes",
 		Help: "Number of nodes currently marked as powered off",
 	}, []string{"node"})
+	PowerOnAttempts = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "power_on_attempts_total",
+		Help: "Number of power-on attempts",
+	})
+	PowerOnSuccesses = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "power_on_successes_total",
+		Help: "Number of successful power-ons",
+	})
 )
 
 func Init() {
-	prometheus.MustRegister(Evaluations, ScaleDowns, ShutdownAttempts, ShutdownSuccesses, EvictionFailures)
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(":9090", nil)
 }

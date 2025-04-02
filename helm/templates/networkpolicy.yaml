@@ -18,6 +18,7 @@ spec:
         - protocol: TCP
           port: 9100
 ---
+{{- if .Values.shutdownDaemonset.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -37,3 +38,26 @@ spec:
       ports:
         - protocol: TCP
           port: 9101
+{{- end }}
+---
+{{- if .Values.wolAgent.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cba-to-wol-agent
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ include "cluster-bare-autoscaler.name" . }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.wolAgent.port }}
+{{- end }}

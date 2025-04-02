@@ -29,7 +29,8 @@ const annotationPoweredOff = "cba.dev/was-powered-off"
 type Reconciler struct {
 	cfg               *config.Config
 	client            *kubernetes.Clientset
-	power             power.PowerController
+	shutdowner        power.ShutdownController
+	powerOner         power.PowerOnController
 	state             *NodeStateTracker
 	scaleDownStrategy strategy.ScaleDownStrategy
 	scaleUpStrategy   strategy.ScaleUpStrategy
@@ -40,11 +41,13 @@ type Reconciler struct {
 type ReconcilerOption func(r *Reconciler)
 
 func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, opts ...ReconcilerOption) *Reconciler {
+	shutdowner, powerOner := power.NewControllersFromConfig(cfg, client)
 	r := &Reconciler{
-		cfg:    cfg,
-		client: client,
-		state:  NewNodeStateTracker(),
-		power:  power.NewPowerControllerFromConfig(cfg, client),
+		cfg:        cfg,
+		client:     client,
+		state:      NewNodeStateTracker(),
+		shutdowner: shutdowner,
+		powerOner:  powerOner,
 	}
 
 	// Apply options
@@ -298,7 +301,7 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 	}
 
 	slog.Info("Attempting scale-up", "node", nodeName)
-	err = r.power.PowerOn(ctx, nodeName)
+	err = r.powerOner.PowerOn(ctx, nodeName)
 	if err != nil {
 		slog.Error("PowerOn failed", "node", nodeName, "err", err)
 		return false
@@ -306,12 +309,51 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 
 	slog.Info("Scale-up triggered", "node", nodeName)
 	r.state.ClearPoweredOff(nodeName)
+	metrics.PoweredOffNodes.WithLabelValues(nodeName).Set(0)
+
+	// Uncordon node
+	if err := r.uncordonNode(ctx, nodeName); err != nil {
+		slog.Warn("Failed to uncordon node after power-on", "node", nodeName, "err", err)
+		return false
+	}
+
+	// Clear powered-off annotation
 	if err := r.clearPoweredOffAnnotation(ctx, nodeName); err != nil {
 		slog.Warn("Failed to clear powered-off annotation", "node", nodeName, "err", err)
 	}
-	metrics.PoweredOffNodes.WithLabelValues(nodeName).Set(0)
+
+	r.state.MarkGlobalShutdown()
+	r.state.MarkBooted(nodeName)
 
 	return true // scale-up action performed
+}
+
+func (r *Reconciler) uncordonNode(ctx context.Context, nodeName string) error {
+	node, err := r.client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get node for uncordon: %w", err)
+	}
+
+	if !node.Spec.Unschedulable {
+		slog.Debug("Node is already schedulable", "node", nodeName)
+		return nil
+	}
+
+	updated := node.DeepCopy()
+	updated.Spec.Unschedulable = false
+
+	if r.cfg.DryRun {
+		slog.Debug("Dry-run: would uncordon node", "node", nodeName)
+		return nil
+	}
+
+	_, err = r.client.CoreV1().Nodes().Update(ctx, updated, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to uncordon node: %w", err)
+	}
+
+	slog.Info("Node uncordoned successfully", "node", nodeName)
+	return nil
 }
 
 func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) bool {
@@ -357,7 +399,7 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		defer span.End()
 
 		metrics.ShutdownAttempts.Inc()
-		if err := r.power.Shutdown(ctx, candidate.Name); err != nil {
+		if err := r.shutdowner.Shutdown(ctx, candidate.Name); err != nil {
 			slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
 			if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
 				slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
@@ -422,13 +464,23 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 				continue
 			}
 
-			if r.state.IsInCooldown(node.Name, time.Now(), r.cfg.Cooldown) {
-				slog.Info("Skipping node due to cooldown", "node", node.Name)
+			now := time.Now()
+			if r.state.IsInCooldown(node.Name, now, r.cfg.Cooldown) {
+				slog.Info("Skipping node due to shutdown cooldown", "node", node.Name)
+				continue
+			}
+			if r.state.IsBootCooldownActive(node.Name, now, r.cfg.BootCooldown) {
+				slog.Info("Skipping node due to boot cooldown", "node", node.Name)
 				continue
 			}
 
 			if r.state.IsPoweredOff(node.Name) {
 				slog.Info("Skipping node: already powered off", "node", node.Name)
+				continue
+			}
+
+			if r.state.IsBootCooldownActive(node.Name, time.Now(), r.cfg.BootCooldown) {
+				slog.Info("Skipping node due to boot cooldown", "node", node.Name)
 				continue
 			}
 

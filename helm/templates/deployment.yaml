@@ -53,3 +53,46 @@ spec:
         - name: config
           configMap:
             name: {{ include "cluster-bare-autoscaler.fullname" . }}-config
+---
+{{- if .Values.wolAgent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
+  template:
+    metadata:
+      labels:
+        app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      containers:
+        - name: wol-agent
+          image: "{{ .Values.wolAgent.image.repository }}:{{ .Values.wolAgent.image.tag }}"
+          imagePullPolicy: {{ .Values.wolAgent.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.wolAgent.port }}
+              name: http
+          securityContext:
+            capabilities:
+              add:
+                - NET_RAW
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.wolAgent.resources | nindent 12 }}
+      restartPolicy: Always
+{{- end }}
