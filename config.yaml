@@ -13,7 +13,8 @@ ignoreLabels:
 loadAverageStrategy:
   enabled: true
   nodeThreshold: 0.7
-  clusterWideThreshold: 0.5
+  scaleDownThreshold: 0.5
+  scaleUpThreshold: 0.75
   podLabel: "app=cluster-bare-autoscaler-sysmetrics"
   namespace: cluster-bare-autoscaler
   port: 9100

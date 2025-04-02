@@ -27,15 +27,16 @@ import (
 const annotationPoweredOff = "cba.dev/was-powered-off"
 
 type Reconciler struct {
-	cfg               *config.Config
-	client            *kubernetes.Clientset
-	shutdowner        power.ShutdownController
-	powerOner         power.PowerOnController
-	state             *NodeStateTracker
-	scaleDownStrategy strategy.ScaleDownStrategy
-	scaleUpStrategy   strategy.ScaleUpStrategy
-	dryRunNodeLoad    *float64 // optional CLI override
-	dryRunClusterLoad *float64 // optional CLI override
+	cfg                   *config.Config
+	client                *kubernetes.Clientset
+	shutdowner            power.ShutdownController
+	powerOner             power.PowerOnController
+	state                 *NodeStateTracker
+	scaleDownStrategy     strategy.ScaleDownStrategy
+	scaleUpStrategy       strategy.ScaleUpStrategy
+	dryRunNodeLoad        *float64 // optional CLI override
+	dryRunClusterLoadDown *float64 // CLI override for scale-down
+	dryRunClusterLoadUp   *float64 // CLI override for scale-up
 }
 
 type ReconcilerOption func(r *Reconciler)
@@ -62,6 +63,11 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 	return r
 }
 
+// buildScaleDownStrategy constructs a composite scale-down strategy based on the current config.
+// It includes the ResourceAwareScaleDown strategy by default to ensure pods can fit elsewhere.
+// If LoadAverageStrategy is enabled, it adds LoadAverageScaleDown, which shuts down nodes
+// based on normalized per-node and cluster-wide load averages.
+// Supports dry-run overrides and evaluates multiple strategies using a MultiStrategy chain.
 func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, r *Reconciler) strategy.ScaleDownStrategy {
 	var strategies []strategy.ScaleDownStrategy
 
@@ -94,9 +100,9 @@ func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, me
 			HTTPPort:                  cfg.LoadAverageStrategy.Port,
 			HTTPTimeout:               time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
 			NodeThreshold:             cfg.LoadAverageStrategy.NodeThreshold,
-			ClusterWideThreshold:      cfg.LoadAverageStrategy.ClusterWideThreshold,
+			ClusterWideThreshold:      cfg.LoadAverageStrategy.ScaleDownThreshold,
 			DryRunNodeLoadOverride:    r.dryRunNodeLoad,
-			DryRunClusterLoadOverride: r.dryRunClusterLoad,
+			DryRunClusterLoadOverride: r.dryRunClusterLoadDown,
 			IgnoreLabels:              cfg.IgnoreLabels,
 			ClusterEvalMode:           strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 		})
@@ -111,6 +117,11 @@ func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, me
 	return &strategy.MultiStrategy{Strategies: strategies}
 }
 
+// buildScaleUpStrategy constructs a composite scale-up strategy based on the current config.
+// It always includes MinNodeCountScaleUp to maintain the minimum required nodes,
+// and optionally includes LoadAverageScaleUp if enabled, which powers on nodes based on
+// cluster-wide load average. Dry-run overrides for cluster-wide load are respected.
+// The resulting strategy is a MultiUpStrategy that evaluates all sub-strategies in order.
 func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStrategy {
 	upStrategies := []strategy.ScaleUpStrategy{
 		&strategy.MinNodeCountScaleUp{
@@ -118,6 +129,21 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 			ActiveNodes:  r.listActiveNodes,
 			ShutdownList: r.shutdownNodeNames,
 		},
+	}
+
+	if cfg.LoadAverageStrategy.Enabled {
+		upStrategies = append(upStrategies, &strategy.LoadAverageScaleUp{
+			Client:               r.client,
+			Namespace:            cfg.LoadAverageStrategy.Namespace,
+			PodLabel:             cfg.LoadAverageStrategy.PodLabel,
+			HTTPPort:             cfg.LoadAverageStrategy.Port,
+			HTTPTimeout:          time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
+			ClusterEvalMode:      strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
+			ClusterWideThreshold: cfg.LoadAverageStrategy.ScaleUpThreshold,
+			DryRunOverride:       r.dryRunClusterLoadUp,
+			IgnoreLabels:         cfg.IgnoreLabels,
+			ShutdownCandidates:   r.shutdownNodeNames,
+		})
 	}
 
 	names := []string{}
