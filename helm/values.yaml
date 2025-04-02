@@ -97,7 +97,8 @@ config:
     node-role.kubernetes.io/control-plane: ""
   loadAverageStrategy:
     enabled: true
-    threshold: 0.7
+    scaleDownThreshold: 0.5
+    scaleUpThreshold: 0.75
     podLabel: "app=cluster-bare-autoscaler-sysmetrics"
     namespace: ""
     port: 9100

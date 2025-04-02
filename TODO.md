@@ -1,7 +1,6 @@
 # TODO for Cluster Bare Autoscaler
 
 ## 🔧 In Progress / Next Up
-- Cluster-wide strategy in the ScaleUp chain: load evaluation (average, median, p90, p75) 
 - ScaleUp trigger based on unschedulable pod events (e.g., from K8s scheduler)
 
 ## 📌 Planned / Backlog

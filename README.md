@@ -22,17 +22,27 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 
 ## Features
 
-- ✅ Pluggable scale-down **and scale-up** strategies
-- ✅ Resource-aware scale-down (CPU/mem request + usage)
-- ✅ Load average-aware scale-down using `/proc/loadavg`
-- ✅ Cluster-wide load evaluation (average, median, p90, p75) in LoadAverageStrategy
+- ✅ **Pluggable scale-down and scale-up strategies**
+    - Multi-strategy chaining with short-circuit logic
+    - Dry-run mode for testing (`--dry-run`)
+- ✅ **Resource-aware scale-down**
+    - Considers CPU and memory requests
+    - Optionally uses live usage metrics
+- ✅ **Load average-aware scale-down and scale-up** using `/proc/loadavg`
+    - Supports aggregation modes: `average`, `median`, `p75`, `p90`
+    - Separate thresholds for scale-up and scale-down decisions
+    - CLI dry-run overrides:
+        - `--dry-run-cluster-load-down`
+        - `--dry-run-cluster-load-up`
 - ✅ **MinNodeCount-based scale-up** to maintain minimum node count
-- ✅ Multi-strategy chaining (short-circuit logic)
-- ✅ Dry-run mode for testing, with CLI overrides
-- ✅ Cooldown tracking (global + per-node boot/shutdown)
-- ✅ Nodes marked with `cba.dev/was-powered-off: true` or `.Disabled` are ignored
-- ✅ Safe cordon and drain before shutdown
-- ✅ Wake-on-LAN support for bare-metal power-on
+- ✅ **Cooldown tracking**
+    - Global cooldown period
+    - Per-node boot/shutdown cooldowns
+- ✅ **Node eligibility filtering**
+    - Ignores nodes with label `cba.dev/was-powered-off: true`
+    - Respects `.Disabled` flag in `config.yaml`
+- ✅ **Safe cordon and drain** using Kubernetes eviction API
+- ✅ **Wake-on-LAN support** for powering on bare-metal machines
 
 ## Additional, optionable services
 
