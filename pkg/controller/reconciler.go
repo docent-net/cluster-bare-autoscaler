@@ -32,6 +32,7 @@ type Reconciler struct {
 	power             power.PowerController
 	state             *NodeStateTracker
 	scaleDownStrategy strategy.ScaleDownStrategy
+	scaleUpStrategy   strategy.ScaleUpStrategy
 	dryRunNodeLoad    *float64 // optional CLI override
 	dryRunClusterLoad *float64 // optional CLI override
 }
@@ -51,6 +52,14 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 		opt(r)
 	}
 
+	r.scaleDownStrategy = buildScaleDownStrategy(cfg, client, metricsClient, r)
+	r.scaleUpStrategy = buildScaleUpStrategy(cfg, r)
+
+	r.restorePoweredOffState(context.Background())
+	return r
+}
+
+func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, r *Reconciler) strategy.ScaleDownStrategy {
 	var strategies []strategy.ScaleDownStrategy
 
 	strategies = append(strategies, &strategy.ResourceAwareScaleDown{
@@ -96,10 +105,25 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 	}
 	slog.Info("Configured scale-down strategy chain", "strategies", names)
 
-	r.scaleDownStrategy = &strategy.MultiStrategy{Strategies: strategies}
-	r.restorePoweredOffState(context.Background())
+	return &strategy.MultiStrategy{Strategies: strategies}
+}
 
-	return r
+func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStrategy {
+	upStrategies := []strategy.ScaleUpStrategy{
+		&strategy.MinNodeCountScaleUp{
+			Cfg:          r.cfg,
+			ActiveNodes:  r.listActiveNodes,
+			ShutdownList: r.shutdownNodeNames,
+		},
+	}
+
+	names := []string{}
+	for _, s := range upStrategies {
+		names = append(names, s.Name())
+	}
+	slog.Info("Configured scale-up strategy chain", "strategies", names)
+
+	return &strategy.MultiUpStrategy{Strategies: upStrategies}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -116,18 +140,18 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	slog.Info("Running reconcile loop")
 	metrics.Evaluations.Inc()
 
+	if r.maybeScaleUp(ctx) {
+		return nil // stop here to avoid scaling up in the same loop
+	}
+
 	allNodes, err := r.listAllNodes(ctx)
 	if err != nil {
 		return err
 	}
 
 	eligible := r.filterEligibleNodes(ctx, allNodes.Items)
+	r.maybeScaleDown(ctx, eligible)
 
-	if r.maybeScaleDown(ctx, eligible) {
-		return nil // stop here to avoid scaling up in the same loop
-	}
-
-	r.maybeScaleUp(ctx)
 	return nil
 }
 
@@ -177,30 +201,117 @@ func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
 	return nodes, nil
 }
 
-func (r *Reconciler) maybeScaleUp(ctx context.Context) {
-	if !r.shouldScaleUp(ctx) {
-		return
+func (r *Reconciler) listActiveNodes(ctx context.Context) ([]v1.Node, error) {
+	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
 	}
 
-	for _, nodeCfg := range r.cfg.Nodes {
-		if nodeCfg.Disabled {
+	var active []v1.Node
+	for _, node := range nodes.Items {
+		// Skip cordoned nodes
+		if node.Spec.Unschedulable {
 			continue
 		}
-		if r.state.IsPoweredOff(nodeCfg.Name) {
-			slog.Info("Attempting scale-up", "node", nodeCfg.Name)
-			err := r.power.PowerOn(ctx, nodeCfg.Name)
-			if err != nil {
-				slog.Error("PowerOn failed", "node", nodeCfg.Name, "err", err)
-			} else {
-				slog.Info("Scale-up triggered", "node", nodeCfg.Name)
-				r.state.ClearPoweredOff(nodeCfg.Name)
-				_ = r.clearPoweredOffAnnotation(ctx, nodeCfg.Name)
-				metrics.PoweredOffNodes.WithLabelValues(nodeCfg.Name).Set(0)
-			}
 
-			break // one per loop
+		// Skip ignored labels
+		skip := false
+		for k, v := range r.cfg.IgnoreLabels {
+			if nodeVal, ok := node.Labels[k]; ok && nodeVal == v {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		// Skip nodes with annotationPoweredOff
+		if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
+			continue
+		}
+
+		// Skip nodes marked as powered-off in state tracker
+		if r.state.IsPoweredOff(node.Name) {
+			continue
+		}
+
+		// Must be Ready
+		for _, cond := range node.Status.Conditions {
+			if cond.Type == v1.NodeReady && cond.Status == v1.ConditionTrue {
+				active = append(active, node)
+				break
+			}
 		}
 	}
+
+	return active, nil
+}
+
+func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
+	var result []string
+
+	// Step 1: Build a set of powered-off state from internal memory
+	poweredOffSet := make(map[string]bool)
+	for _, node := range r.cfg.Nodes {
+		if node.Disabled {
+			continue
+		}
+		if r.state.IsPoweredOff(node.Name) {
+			poweredOffSet[node.Name] = true
+		}
+	}
+
+	// Step 2: Cross-check with API — add nodes explicitly annotated as powered off
+	apiNodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		slog.Warn("Unable to list nodes for shutdown state evaluation", "err", err)
+	} else {
+		for _, node := range apiNodes.Items {
+			if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
+				poweredOffSet[node.Name] = true
+			}
+		}
+	}
+
+	// Step 3: Build result list from config list (to preserve order and honor .Disabled)
+	for _, node := range r.cfg.Nodes {
+		if node.Disabled {
+			continue
+		}
+		if poweredOffSet[node.Name] {
+			result = append(result, node.Name)
+		}
+	}
+
+	return result
+}
+
+func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
+	nodeName, shouldScale, err := r.scaleUpStrategy.ShouldScaleUp(ctx)
+	if err != nil {
+		slog.Error("Scale-up strategy error", "err", err)
+		return false
+	}
+	if !shouldScale {
+		return false
+	}
+
+	slog.Info("Attempting scale-up", "node", nodeName)
+	err = r.power.PowerOn(ctx, nodeName)
+	if err != nil {
+		slog.Error("PowerOn failed", "node", nodeName, "err", err)
+		return false
+	}
+
+	slog.Info("Scale-up triggered", "node", nodeName)
+	r.state.ClearPoweredOff(nodeName)
+	if err := r.clearPoweredOffAnnotation(ctx, nodeName); err != nil {
+		slog.Warn("Failed to clear powered-off annotation", "node", nodeName, "err", err)
+	}
+	metrics.PoweredOffNodes.WithLabelValues(nodeName).Set(0)
+
+	return true // scale-up action performed
 }
 
 func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) bool {
@@ -235,6 +346,10 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 			}
 			return false
 		}
+
+		if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
+			slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
+		}
 	}
 
 	{
@@ -258,10 +373,6 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 	if !r.cfg.DryRun {
 		r.state.MarkShutdown(candidate.Name)
 		r.state.MarkPoweredOff(candidate.Name)
-
-		if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
-			slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
-		}
 	}
 
 	return true
@@ -332,10 +443,6 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 	})
 
 	return eligible
-}
-
-func (r *Reconciler) shouldScaleUp(ctx context.Context) bool {
-	return true // Always scale up — will replace with real strategy later
 }
 
 func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {
