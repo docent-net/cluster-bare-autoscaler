@@ -49,7 +49,7 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 - ✅ Metrics DaemonSet for per-node load average via `/proc/loadavg`
 - ✅ Power-off DaemonSet for secure node shutdown via systemd socket activation
 - ✅ Wake-on-LAN agent (wol-agent) for powering nodes via HTTP-triggered magic packets
-- 
+
 ---
 
 ## Metrics

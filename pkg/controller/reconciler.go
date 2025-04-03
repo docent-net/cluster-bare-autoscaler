@@ -11,8 +11,6 @@ import (
 	"math/rand"
 	"time"
 
-	"go.opentelemetry.io/otel"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -156,9 +154,6 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
-	ctx, span := otel.Tracer("autoscaler").Start(ctx, "reconcile-loop")
-	defer span.End()
-
 	now := time.Now()
 	if r.state.IsGlobalCooldownActive(now, r.cfg.Cooldown) {
 		remaining := r.cfg.Cooldown - now.Sub(r.state.lastShutdownTime)
@@ -209,22 +204,15 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 }
 
 func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []v1.Node {
-	_, span := otel.Tracer("autoscaler").Start(ctx, "filter-eligible-nodes")
-	defer span.End()
-
 	eligible := r.getEligibleNodes(nodes)
 	slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(nodes))
 	return eligible
 }
 
 func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
-	spanCtx, span := otel.Tracer("autoscaler").Start(ctx, "list-nodes")
-	defer span.End()
-
-	nodes, err := r.client.CoreV1().Nodes().List(spanCtx, metav1.ListOptions{})
+	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		slog.Error("failed to list nodes", "err", err)
-		span.RecordError(err)
 		return nil, err
 	}
 	return nodes, nil
@@ -403,39 +391,29 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
 	metrics.ScaleDowns.Inc()
 
-	{
-		_, span := otel.Tracer("autoscaler").Start(ctx, "cordon-and-drain")
-		defer span.End()
-
-		if err := r.cordonAndDrain(ctx, candidate); err != nil {
-			slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
-			if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
-				slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
-			}
-			return false
+	if err := r.cordonAndDrain(ctx, candidate); err != nil {
+		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
+		if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
 		}
-
-		if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
-			slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
-		}
+		return false
 	}
 
-	{
-		_, span := otel.Tracer("autoscaler").Start(ctx, "shutdown")
-		defer span.End()
+	if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
+		slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
+	}
 
-		metrics.ShutdownAttempts.Inc()
-		if err := r.shutdowner.Shutdown(ctx, candidate.Name); err != nil {
-			slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
-			if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
-				slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
-			}
-		} else {
-			slog.Info("Shutdown initiated", "node", candidate.Name)
-			metrics.ShutdownSuccesses.Inc()
-			metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
-			r.state.MarkGlobalShutdown()
+	metrics.ShutdownAttempts.Inc()
+	if err := r.shutdowner.Shutdown(ctx, candidate.Name); err != nil {
+		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
+		if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
 		}
+	} else {
+		slog.Info("Shutdown initiated", "node", candidate.Name)
+		metrics.ShutdownSuccesses.Inc()
+		metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
+		r.state.MarkGlobalShutdown()
 	}
 
 	if !r.cfg.DryRun {
