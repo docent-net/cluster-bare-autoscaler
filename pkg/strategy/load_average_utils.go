@@ -58,7 +58,12 @@ func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore m
 
 	var names []string
 	for _, n := range nodes.Items {
-		if n.Name != exclude && !ShouldIgnoreNode(n, ignore) {
+		if _, isDown := n.Annotations["cba.dev/was-powered-off"]; isDown {
+			slog.Debug("Skipping load fetch: node has powered-off annotation", "node", n.Name)
+			continue
+		}
+
+		if n.Name != exclude && !ShouldIgnoreNodeDueToLabels(n, ignore) {
 			names = append(names, n.Name)
 		}
 	}
@@ -132,7 +137,7 @@ func (u *ClusterLoadUtils) findMetricsPodForNode(ctx context.Context, nodeName s
 	return nil, fmt.Errorf("no metrics pod for node %s", nodeName)
 }
 
-func ShouldIgnoreNode(node v1.Node, labels map[string]string) bool {
+func ShouldIgnoreNodeDueToLabels(node v1.Node, labels map[string]string) bool {
 	for k, v := range labels {
 		if val, ok := node.Labels[k]; ok && val == v {
 			return true
