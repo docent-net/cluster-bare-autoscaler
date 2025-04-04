@@ -311,6 +311,7 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 		return false
 	}
 	if !shouldScale {
+		slog.Info("No scale-up possible", "reason", "all strategies denied", "minNodes", r.cfg.MinNodes)
 		return false
 	}
 

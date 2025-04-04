@@ -20,7 +20,6 @@ func shutdownHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer conn.Close()
 
-		// Optionally write something to trigger socket activation
 		_, _ = conn.Write([]byte("shutdown\n"))
 	}()
 

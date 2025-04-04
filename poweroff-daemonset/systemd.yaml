@@ -1,0 +1,62 @@
+##################################################
+#
+# This playbook creates resources required by
+# cluster-bare-autoscaler to shutdown node
+#
+# Create 2 systemd units:
+#
+# 1. cba-shutdown.socket to trigger on SocketActivation
+# 2. related cba-shutdown.service that runs actual systemctl poweroff command
+#
+##################################################
+
+---
+- hosts: kube_node
+  gather_facts: False
+  become: true
+  tasks:
+    - name: Create systemd socket unit
+      copy:
+        dest: /etc/systemd/system/cba-shutdown.socket
+        owner: root
+        group: root
+        mode: 0644
+        content: |
+          [Unit]
+          Description=CBA shutdown socket
+
+          [Socket]
+          ListenStream=/run/cba-shutdown.sock
+          SocketMode=0660
+          SocketUser=root
+          SocketGroup=root
+
+          [Install]
+          WantedBy=sockets.target
+
+    - name: Create systemd service unit
+      copy:
+        dest: /etc/systemd/system/cba-shutdown.service
+        owner: root
+        group: root
+        mode: 0644
+        content: |
+          [Unit]
+          Description=Shutdown triggered by CBA
+          Requires=cba-shutdown.socket
+
+          [Service]
+          ExecStart=/usr/bin/systemctl poweroff
+          StandardInput=socket
+          User=root
+          Group=root
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: true
+
+    - name: Enable and start shutdown socket
+      systemd:
+        name: cba-shutdown.socket
+        enabled: true
+        state: started

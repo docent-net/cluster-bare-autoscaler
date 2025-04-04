@@ -2,6 +2,7 @@
 
 ## 🔧 In Progress / Next Up
 - ScaleUp trigger based on unschedulable pod events (e.g., from K8s scheduler)
+- Drop root in side-daemonsets/deployments where not required
 
 ## 📌 Planned / Backlog
 - Alternative metrics agent using eBPF (instead of HTTP DaemonSet)
