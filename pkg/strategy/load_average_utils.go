@@ -50,10 +50,10 @@ func NewClusterLoadUtils(client kubernetes.Interface, ns, label string, port int
 	}
 }
 
-func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore map[string]string, exclude string) ([]float64, error) {
+func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore map[string]string, exclude string) ([]float64, map[string]float64, error) {
 	nodes, err := u.Client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var names []string
@@ -70,17 +70,23 @@ func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore m
 	return u.FetchClusterLoads(ctx, names)
 }
 
-func (u *ClusterLoadUtils) FetchClusterLoads(ctx context.Context, nodeNames []string) ([]float64, error) {
+func (u *ClusterLoadUtils) FetchClusterLoads(ctx context.Context, nodeNames []string) ([]float64, map[string]float64, error) {
 	var results []float64
+	var loads []float64
+	nodeToLoad := make(map[string]float64)
+
 	for _, name := range nodeNames {
 		load, err := u.FetchNormalizedLoad(ctx, name)
 		if err != nil {
 			slog.Warn("Skipping node due to error", "node", name, "err", err)
 			continue
 		}
+		loads = append(loads, load)
+		nodeToLoad[name] = load
+
 		results = append(results, load)
 	}
-	return results, nil
+	return loads, nodeToLoad, nil
 }
 
 func (u *ClusterLoadUtils) FetchNormalizedLoad(ctx context.Context, nodeName string) (float64, error) {
@@ -218,10 +224,14 @@ func (u *ClusterLoadUtils) GetClusterAggregateLoad(
 		return *override, nil
 	}
 
-	loads, err := u.GetEligibleClusterLoads(ctx, ignoreLabels, excludeNode)
+	loads, nodeLoads, err := u.GetEligibleClusterLoads(ctx, ignoreLabels, excludeNode)
 	if err != nil || len(loads) == 0 {
 		slog.Warn("No eligible cluster load data available", "err", err)
 		return 0, fmt.Errorf("no cluster load data")
+	}
+
+	for node, val := range nodeLoads {
+		slog.Debug("Cluster load sample", "node", node, "normalizedLoad", val)
 	}
 
 	return EvaluateAggregate(loads, mode), nil
