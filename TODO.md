@@ -1,18 +1,22 @@
 # TODO for Cluster Bare Autoscaler
 
 ## 🔧 In Progress / Next Up
-- ScaleUp trigger based on unschedulable pod events (e.g., from K8s scheduler)
 - Drop root in side-daemonsets/deployments where not required
+- Increase unit tests coverage
 
 ## 📌 Planned / Backlog
+- APM tracing & profiling (otel)
+- Otel metrics and dashboards
+- Documentation with examples, quick start etc
+- Helm chart: registry override, versioning, optional ServiceMonitor
+- ScaleUp trigger based on unschedulable pod events (e.g., from K8s scheduler)
+- Drain-aware scale-down
+- minNodesPerGroup enforcement for scale-down
 - Alternative metrics agent using eBPF (instead of HTTP DaemonSet)
-- Per-strategy Prometheus metrics
+- Per-strategy Prometheus and otel metrics
 - Integration tests: simulate multi-node scenarios with mocks/fakes
 - CLI enhancements: add usage examples, better validation
-- Helm chart: registry override, versioning, optional ServiceMonitor
 - Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
 - Refactor config loading in Helm chart (`.Values.config.*` passed to config.yaml)
-- Strategy debug tracing: per-strategy logs for denied scale-down
-- Add more spans to tracing
 - Optional randomized polling interval to prevent thundering herd
 - Detect pod eviction stuck conditions
