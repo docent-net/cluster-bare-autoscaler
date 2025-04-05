@@ -17,6 +17,4 @@
 - Integration tests: simulate multi-node scenarios with mocks/fakes
 - CLI enhancements: add usage examples, better validation
 - Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
-- Refactor config loading in Helm chart (`.Values.config.*` passed to config.yaml)
-- Optional randomized polling interval to prevent thundering herd
 - Detect pod eviction stuck conditions
