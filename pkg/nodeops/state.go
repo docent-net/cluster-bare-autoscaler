@@ -10,7 +10,7 @@
 //    - Starts when any node is shut down (scale-down) or powered on (scale-up).
 //    - Prevents *any* further scaling actions (both up and down) across all nodes.
 //    - Duration is configured via `cooldown` in `config.yaml`.
-//    - Tracked using `lastShutdownTime`.
+//    - Tracked using `LastShutdownTime`.
 //
 // 2. **Per-node Cooldowns**:
 //    - These prevent excessive churning by rate-limiting actions on individual nodes.
@@ -30,18 +30,20 @@
 //   This is a temporary, in-memory view used by the autoscaler to avoid re-powering nodes
 //   during the same runtime session. It is cleared upon scale-up.
 
-package controller
+package nodeops
 
 import (
+	"sync"
 	"time"
 )
 
 // NodeStateTracker keeps track of node cooldowns and powered-off state.
 type NodeStateTracker struct {
+	mu                 sync.Mutex
 	shutdownTimestamps map[string]time.Time
 	bootTimestamps     map[string]time.Time
 	poweredOff         map[string]struct{}
-	lastShutdownTime   time.Time
+	LastShutdownTime   time.Time
 }
 
 // NewNodeStateTracker initializes all internal maps for tracking.
@@ -86,12 +88,12 @@ func (s *NodeStateTracker) IsPoweredOff(node string) bool {
 // MarkGlobalShutdown sets the timestamp for the last global scale-up/down action.
 // This is used to enforce the global cooldown across all nodes.
 func (s *NodeStateTracker) MarkGlobalShutdown() {
-	s.lastShutdownTime = time.Now()
+	s.LastShutdownTime = time.Now()
 }
 
 // IsGlobalCooldownActive returns true if the current time is still within global cooldown window.
 func (s *NodeStateTracker) IsGlobalCooldownActive(now time.Time, cooldown time.Duration) bool {
-	return now.Sub(s.lastShutdownTime) < cooldown
+	return now.Sub(s.LastShutdownTime) < cooldown
 }
 
 // MarkBooted stores the timestamp when the node was powered on.
@@ -106,4 +108,10 @@ func (s *NodeStateTracker) IsBootCooldownActive(node string, now time.Time, cool
 		return false
 	}
 	return now.Sub(last) < cooldown
+}
+
+func (s *NodeStateTracker) SetShutdownTime(nodeName string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shutdownTimestamps[nodeName] = t
 }

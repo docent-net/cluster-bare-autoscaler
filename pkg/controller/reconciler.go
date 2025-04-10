@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	policyv1 "k8s.io/api/policy/v1"
@@ -29,7 +30,7 @@ type Reconciler struct {
 	client                *kubernetes.Clientset
 	shutdowner            power.ShutdownController
 	powerOner             power.PowerOnController
-	state                 *NodeStateTracker
+	state                 *nodeops.NodeStateTracker
 	scaleDownStrategy     strategy.ScaleDownStrategy
 	scaleUpStrategy       strategy.ScaleUpStrategy
 	dryRunNodeLoad        *float64 // optional CLI override
@@ -44,7 +45,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 	r := &Reconciler{
 		cfg:        cfg,
 		client:     client,
-		state:      NewNodeStateTracker(),
+		state:      nodeops.NewNodeStateTracker(),
 		shutdowner: shutdowner,
 		powerOner:  powerOner,
 	}
@@ -156,7 +157,7 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	now := time.Now()
 	if r.state.IsGlobalCooldownActive(now, r.cfg.Cooldown) {
-		remaining := r.cfg.Cooldown - now.Sub(r.state.lastShutdownTime)
+		remaining := r.cfg.Cooldown - now.Sub(r.state.LastShutdownTime)
 		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining.Round(time.Second).String())
 		return nil
 	}
@@ -192,13 +193,19 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 		active[node.Name] = struct{}{}
 	}
 
-	for _, nodeCfg := range r.cfg.Nodes {
-		if nodeCfg.Disabled {
-			continue
-		}
-		if _, found := active[nodeCfg.Name]; !found {
-			slog.Info("Node from config not found in cluster — assuming powered off", "node", nodeCfg.Name)
-			r.state.MarkPoweredOff(nodeCfg.Name)
+	managed, err := nodeops.ListManagedNodes(ctx, r.client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.cfg.NodeLabels.Managed,
+		DisabledLabel: r.cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.cfg.IgnoreLabels,
+	})
+	if err != nil {
+		slog.Warn("Failed to list managed nodes during restore", "err", err)
+		return
+	}
+	for _, node := range managed {
+		if _, found := active[node.Name]; !found {
+			slog.Info("Managed node not found in active set — assuming powered off", "node", node.Name)
+			r.state.MarkPoweredOff(node.Name)
 		}
 	}
 }
@@ -266,42 +273,17 @@ func (r *Reconciler) listActiveNodes(ctx context.Context) ([]v1.Node, error) {
 }
 
 func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
-	var result []string
+	nodes, err := nodeops.ListShutdownNodeNames(ctx, r.client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.cfg.NodeLabels.Managed,
+		DisabledLabel: r.cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.cfg.IgnoreLabels,
+	}, r.state)
 
-	// Step 1: Build a set of powered-off state from internal memory
-	poweredOffSet := make(map[string]bool)
-	for _, node := range r.cfg.Nodes {
-		if node.Disabled {
-			continue
-		}
-		if r.state.IsPoweredOff(node.Name) {
-			poweredOffSet[node.Name] = true
-		}
-	}
-
-	// Step 2: Cross-check with API — add nodes explicitly annotated as powered off
-	apiNodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		slog.Warn("Unable to list nodes for shutdown state evaluation", "err", err)
-	} else {
-		for _, node := range apiNodes.Items {
-			if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
-				poweredOffSet[node.Name] = true
-			}
-		}
+		slog.Warn("Failed to list shutdown nodes", "err", err)
+		return nil
 	}
-
-	// Step 3: Build result list from config list (to preserve order and honor .Disabled)
-	for _, node := range r.cfg.Nodes {
-		if node.Disabled {
-			continue
-		}
-		if poweredOffSet[node.Name] {
-			result = append(result, node.Name)
-		}
-	}
-
-	return result
+	return nodes
 }
 
 func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {

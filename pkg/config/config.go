@@ -14,15 +14,25 @@ type NodeConfig struct {
 	WOLMacAddr string `yaml:"wolMacAddr,omitempty"`
 }
 
+type NodeLabelConfig struct {
+	Managed  string `yaml:"managed"`
+	Disabled string `yaml:"disabled"`
+}
+
+type NodeAnnotationConfig struct {
+	MAC string `yaml:"mac"`
+}
+
 type Config struct {
 	LogLevel string `yaml:"logLevel"`
 
-	MinNodes     int               `yaml:"minNodes"`
-	Cooldown     time.Duration     `yaml:"cooldown"`
-	BootCooldown time.Duration     `yaml:"bootCooldown"`
-	PollInterval time.Duration     `yaml:"pollInterval"`
-	IgnoreLabels map[string]string `yaml:"ignoreLabels"`
-	Nodes        []NodeConfig      `yaml:"nodes"`
+	MinNodes        int                  `yaml:"minNodes"`
+	Cooldown        time.Duration        `yaml:"cooldown"`
+	BootCooldown    time.Duration        `yaml:"bootCooldown"`
+	PollInterval    time.Duration        `yaml:"pollInterval"`
+	IgnoreLabels    map[string]string    `yaml:"ignoreLabels"`
+	NodeLabels      NodeLabelConfig      `yaml:"nodeLabels"`
+	NodeAnnotations NodeAnnotationConfig `yaml:"nodeAnnotations"`
 
 	ResourceBufferCPUPerc    int `yaml:"resourceBufferCPUPerc"`
 	ResourceBufferMemoryPerc int `yaml:"resourceBufferMemoryPerc"`

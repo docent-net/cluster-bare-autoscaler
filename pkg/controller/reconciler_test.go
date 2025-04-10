@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func makeNode(name string, labels map[string]string) v1.Node {
 func TestGetEligibleNodes_Shuffling(t *testing.T) {
 	r := &Reconciler{
 		cfg:   mockConfig(),
-		state: NewNodeStateTracker(),
+		state: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -63,7 +64,7 @@ func TestGetEligibleNodes(t *testing.T) {
 	}
 	r := &Reconciler{
 		cfg:   cfg,
-		state: NewNodeStateTracker(),
+		state: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -84,7 +85,7 @@ func TestPickScaleDownCandidate(t *testing.T) {
 	}
 	r := &Reconciler{
 		cfg:   cfg,
-		state: NewNodeStateTracker(),
+		state: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -109,13 +110,13 @@ func TestCooldownExclusion(t *testing.T) {
 	cfg := &config.Config{
 		Cooldown: 5 * time.Minute,
 	}
-	state := NewNodeStateTracker()
+	state := nodeops.NewNodeStateTracker()
 	r := &Reconciler{cfg: cfg, state: state}
 
 	node := makeNode("node1", nil)
-	state.MarkShutdown("node1")
 	// Simulate recent shutdown 1 minute ago
-	state.shutdownTimestamps["node1"] = time.Now().Add(-1 * time.Minute)
+	state.MarkShutdown("node1")
+	state.SetShutdownTime("node1", time.Now().Add(-1*time.Minute))
 
 	nodes := []v1.Node{node}
 	eligible := r.getEligibleNodes(nodes)
@@ -127,7 +128,7 @@ func TestCooldownExclusion(t *testing.T) {
 func TestPoweredOffNodeIsExcluded(t *testing.T) {
 	r := &Reconciler{
 		cfg:   &config.Config{},
-		state: NewNodeStateTracker(),
+		state: nodeops.NewNodeStateTracker(),
 	}
 	node := makeNode("node2", nil)
 	r.state.MarkPoweredOff("node2")

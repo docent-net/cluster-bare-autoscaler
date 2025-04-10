@@ -7,9 +7,13 @@ dryRun:
 resourceBufferCPUPerc: 10
 resourceBufferMemoryPerc: 10
 bootstrapCooldownSeconds: 30
+nodeLabels:
+  managed: "cba.dev/is-managed"
+  disabled: "cba.dev/disabled"
+nodeAnnotations:
+  mac: "cba.dev/mac-address"
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""
-  ignore-this-node: yes
 loadAverageStrategy:
   enabled: true
   nodeThreshold: 0.7
@@ -35,19 +39,19 @@ wolAgent:
   namespace: cluster-bare-autoscaler
   podLabel: cluster-bare-autoscaler-wol-agent
 
-nodes:
-  - name: workernode1
-    ip: 192.168.0.10
-    wolMacAddr: xx:xx:xx:xx:xx:xx
-  - name: workernode2
-    ip: 192.168.0.11
-    wolMacAddr: xx:xx:xx:xx:xx:xx
-  - name: workernode3
-    ip: 192.168.0.12
-    wolMacAddr: xx:xx:xx:xx:xx:xx
-  - name: workernode4
-    ip: 192.168.0.13
-    wolMacAddr: xx:xx:xx:xx:xx:xx
-  - name: workernode5
-    ip: 192.168.0.14
-    wolMacAddr: xx:xx:xx:xx:xx:xx
+#nodes:
+#  - name: workernode1
+#    ip: 192.168.0.10
+#    wolMacAddr: xx:xx:xx:xx:xx:xx
+#  - name: workernode2
+#    ip: 192.168.0.11
+#    wolMacAddr: xx:xx:xx:xx:xx:xx
+#  - name: workernode3
+#    ip: 192.168.0.12
+#    wolMacAddr: xx:xx:xx:xx:xx:xx
+#  - name: workernode4
+#    ip: 192.168.0.13
+#    wolMacAddr: xx:xx:xx:xx:xx:xx
+#  - name: workernode5
+#    ip: 192.168.0.14
+#    wolMacAddr: xx:xx:xx:xx:xx:xx
