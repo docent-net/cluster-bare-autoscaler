@@ -27,7 +27,7 @@ type ShutdownController interface {
 	Shutdown(ctx context.Context, nodeName string) error
 }
 
-func NewControllersFromConfig(cfg *config.Config, client *kubernetes.Clientset) (ShutdownController, PowerOnController) {
+func NewControllersFromConfig(cfg *config.Config, client kubernetes.Interface) (ShutdownController, PowerOnController) {
 	var shutdowner ShutdownController
 	switch cfg.ShutdownMode {
 	case ShutdownModeDisabled:

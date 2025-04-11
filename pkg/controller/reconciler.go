@@ -23,8 +23,6 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/strategy"
 )
 
-const annotationPoweredOff = "cba.dev/was-powered-off"
-
 type Reconciler struct {
 	cfg                   *config.Config
 	client                *kubernetes.Clientset
@@ -251,7 +249,7 @@ func (r *Reconciler) listActiveNodes(ctx context.Context) ([]v1.Node, error) {
 		}
 
 		// Skip nodes with annotationPoweredOff
-		if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
+		if val, ok := node.Annotations[nodeops.AnnotationPoweredOff]; ok && val == "true" {
 			continue
 		}
 
@@ -413,7 +411,8 @@ func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, nodeName string
 		return nil
 	}
 	slog.Debug("Annotating node as powered-off", "node", nodeName)
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"true"}}}`, annotationPoweredOff))
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
@@ -424,7 +423,7 @@ func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName str
 		return nil
 	}
 	slog.Debug("Clearing powered-off annotation", "node", nodeName)
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, annotationPoweredOff))
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, nodeops.AnnotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
@@ -441,7 +440,7 @@ func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
 			}
 		}
 		if !skip {
-			if val, ok := node.Annotations[annotationPoweredOff]; ok && val == "true" {
+			if val, ok := node.Annotations[nodeops.AnnotationPoweredOff]; ok && val == "true" {
 				slog.Info("Skipping node marked as powered-off (annotation)", "node", node.Name)
 				continue
 			}

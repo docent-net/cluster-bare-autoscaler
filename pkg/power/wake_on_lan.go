@@ -16,7 +16,7 @@ import (
 
 type WakeOnLanController struct {
 	DryRun         bool
-	Client         *kubernetes.Clientset
+	Client         kubernetes.Interface
 	NodeFilter     nodeops.ManagedNodeFilter
 	Namespace      string
 	PodLabel       string

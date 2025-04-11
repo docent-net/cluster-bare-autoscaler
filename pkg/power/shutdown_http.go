@@ -17,7 +17,7 @@ type ShutdownHTTPController struct {
 	Port      int
 	Namespace string
 	PodLabel  string
-	Client    *kubernetes.Clientset
+	Client    kubernetes.Interface
 }
 
 func (s *ShutdownHTTPController) Shutdown(ctx context.Context, node string) error {
@@ -26,15 +26,15 @@ func (s *ShutdownHTTPController) Shutdown(ctx context.Context, node string) erro
 		return nil
 	}
 
-	podIP, err := s.findShutdownPodIP(ctx, node)
+	podIP, err := s.FindShutdownPodIP(ctx, node)
 	if err != nil {
 		return err
 	}
 
-	return s.sendShutdownRequest(ctx, podIP, node)
+	return s.SendShutdownRequest(ctx, podIP, node)
 }
 
-func (s *ShutdownHTTPController) findShutdownPodIP(ctx context.Context, node string) (string, error) {
+func (s *ShutdownHTTPController) FindShutdownPodIP(ctx context.Context, node string) (string, error) {
 	pods, err := s.Client.CoreV1().Pods(s.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.Set(map[string]string{
 			"app": s.PodLabel,
@@ -53,7 +53,7 @@ func (s *ShutdownHTTPController) findShutdownPodIP(ctx context.Context, node str
 	return "", fmt.Errorf("no shutdown pod found on node %s", node)
 }
 
-func (s *ShutdownHTTPController) sendShutdownRequest(ctx context.Context, podIP, node string) error {
+func (s *ShutdownHTTPController) SendShutdownRequest(ctx context.Context, podIP, node string) error {
 	url := fmt.Sprintf("http://%s:%d/shutdown", podIP, s.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {

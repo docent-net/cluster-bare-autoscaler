@@ -14,6 +14,8 @@ type ManagedNodeFilter struct {
 	IgnoreLabels  map[string]string
 }
 
+const AnnotationPoweredOff = "cba.dev/was-powered-off"
+
 // ListManagedNodes returns all nodes with the specified managed label = "true",
 // skips nodes with the disabled label = "true", and any node that matches any ignoreLabels.
 func ListManagedNodes(ctx context.Context, client kubernetes.Interface, filter ManagedNodeFilter) ([]v1.Node, error) {
@@ -50,11 +52,10 @@ func ListShutdownNodeNames(ctx context.Context, client kubernetes.Interface, fil
 		return nil, err
 	}
 
-	const annotationPoweredOff = "cba.dev/was-powered-off"
 	var shutdown []string
 
 	for _, node := range nodes {
-		if node.Annotations[annotationPoweredOff] == "true" || tracker.IsPoweredOff(node.Name) {
+		if node.Annotations[AnnotationPoweredOff] == "true" || tracker.IsPoweredOff(node.Name) {
 			shutdown = append(shutdown, node.Name)
 		}
 	}

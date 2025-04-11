@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -58,7 +59,7 @@ func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore m
 
 	var names []string
 	for _, n := range nodes.Items {
-		if _, isDown := n.Annotations["cba.dev/was-powered-off"]; isDown {
+		if _, isDown := n.Annotations[nodeops.AnnotationPoweredOff]; isDown {
 			slog.Debug("Skipping load fetch: node has powered-off annotation", "node", n.Name)
 			continue
 		}
