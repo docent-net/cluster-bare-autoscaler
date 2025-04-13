@@ -1,57 +1,96 @@
-logLevel: debug
-minNodes: 3
-cooldown: 60m
-bootCooldown: 360m
-pollInterval: 60s
-dryRun:
-resourceBufferCPUPerc: 10
-resourceBufferMemoryPerc: 10
-bootstrapCooldownSeconds: 30
+# ──────────────────────────────────────────────
+# Logging & Execution Behavior
+# ──────────────────────────────────────────────
+
+logLevel: debug                     # Logging level: one of debug, info, warn, error
+dryRun: false                       # If true, no actual actions (shutdown/power-on/cordon/evict) will be performed
+bootstrapCooldownSeconds: 30       # Sleep duration on startup before first reconcile loop (in seconds)
+
+# ──────────────────────────────────────────────
+# Reconciliation & Cooldown Settings
+# ──────────────────────────────────────────────
+
+minNodes: 3                         # Minimum number of nodes that must remain active
+cooldown: 60m                      # Global cooldown between scale-up/down events (e.g. 60m = 1 hour)
+bootCooldown: 360m                 # Per-node boot cooldown: delay before shutting down a recently powered-on node
+pollInterval: 60s                  # Interval between reconcile loops
+
+# ──────────────────────────────────────────────
+# Resource Buffer Settings
+# ──────────────────────────────────────────────
+
+resourceBufferCPUPerc: 10          # Extra CPU margin (as %) to leave when evaluating node removal
+resourceBufferMemoryPerc: 10       # Extra memory margin (as %) to leave when evaluating node removal
+
+# ──────────────────────────────────────────────
+# Node Discovery & Classification
+# ──────────────────────────────────────────────
+
 nodeLabels:
-  managed: "cba.dev/is-managed"
-  disabled: "cba.dev/disabled"
+  managed: "cba.dev/is-managed"    # Label used to identify autoscaler-managed nodes
+  disabled: "cba.dev/disabled"     # Label used to explicitly exclude a node from autoscaler logic
+
 nodeAnnotations:
-  mac: "cba.dev/mac-address"
+  mac: "cba.dev/mac-address"       # Annotation to store auto-discovered MAC address for WOL
+
 ignoreLabels:
-  node-role.kubernetes.io/control-plane: ""
+  node-role.kubernetes.io/control-plane: ""   # Nodes with this label will be excluded from scaling decisions
+
+# ──────────────────────────────────────────────
+# Load Average-Based Strategy (optional)
+# ──────────────────────────────────────────────
+
 loadAverageStrategy:
-  enabled: true
-  nodeThreshold: 0.7
-  scaleDownThreshold: 0.5
-  scaleUpThreshold: 0.75
-  podLabel: "app=cluster-bare-autoscaler-sysmetrics"
-  namespace: cluster-bare-autoscaler
-  port: 9100
-  timeoutSeconds: 3
-  clusterEval: p75
+  enabled: true                    # Enable scale-down/up decisions based on node/cluster load
+  nodeThreshold: 0.7               # Per-node normalized load15 threshold (scale-down if below)
+  scaleDownThreshold: 0.5          # Cluster-wide load threshold to allow scale-down
+  scaleUpThreshold: 0.75           # Cluster-wide load threshold to trigger scale-up
+  podLabel: "app=cluster-bare-autoscaler-sysmetrics"  # Label used to find sysmetrics DaemonSet pods
+  namespace: cluster-bare-autoscaler                # Namespace for sysmetrics pods
+  port: 9100                        # Port on which the sysmetrics pods expose `/load`
+  timeoutSeconds: 3                # HTTP timeout for querying node metrics
+  clusterEval: p75                 # Cluster-wide aggregation mode: average, median, p90, p75
+
+# ──────────────────────────────────────────────
+# Shutdown Management
+# ──────────────────────────────────────────────
+
 shutdownManager:
-  port: 9101
+  port: 9101                       # Port used by the poweroff daemon to expose `/shutdown`
   namespace: cluster-bare-autoscaler
   podLabel: cluster-bare-autoscaler-poweroff-manager
-shutdownMode: "http"
 
-powerOnMode: "wol"
-wolBroadcastAddr: 192.168.0.255
-wolBootTimeoutSeconds: 600 # 10mins
+shutdownMode: "http"               # One of: disabled, http
+
+# ──────────────────────────────────────────────
+# Power-On Management (Wake-on-LAN)
+# ──────────────────────────────────────────────
+
+powerOnMode: "wol"                 # One of: disabled, wol
+wolBroadcastAddr: 192.168.0.255    # Broadcast address for sending WOL packets
+wolBootTimeoutSeconds: 600         # How long to wait (in seconds) for node readiness after WOL
+
+macDiscoveryInterval: 30m          # How often to refresh missing MAC address annotations (Go duration string)
+
 wolAgent:
   enabled: true
   port: 9102
   namespace: cluster-bare-autoscaler
   podLabel: cluster-bare-autoscaler-wol-agent
 
-#nodes:
-#  - name: workernode1
-#    ip: 192.168.0.10
-#    wolMacAddr: xx:xx:xx:xx:xx:xx
-#  - name: workernode2
-#    ip: 192.168.0.11
-#    wolMacAddr: xx:xx:xx:xx:xx:xx
-#  - name: workernode3
-#    ip: 192.168.0.12
-#    wolMacAddr: xx:xx:xx:xx:xx:xx
-#  - name: workernode4
-#    ip: 192.168.0.13
-#    wolMacAddr: xx:xx:xx:xx:xx:xx
-#  - name: workernode5
-#    ip: 192.168.0.14
-#    wolMacAddr: xx:xx:xx:xx:xx:xx
+# ──────────────────────────────────────────────
+# Node Definitions (via Annotations)
+# ──────────────────────────────────────────────
+# Nodes are discovered dynamically by label (`nodeLabels.managed`)
+# and optionally excluded via label (`nodeLabels.disabled`) or config.ignoreLabels.
+#
+# Each managed node should have:
+# - A label:     cba.dev/is-managed: "true"
+# - A MAC annotation (optional, can be auto-discovered):
+#     - cba.dev/mac-address: <autodiscovered MAC address>
+#     - cba.dev/mac-address-override: <manual MAC address> ← takes precedence if set
+# - A power state annotation (automatically set during shutdown):
+#     - cba.dev/was-powered-off: true
+#
+# Example command to annotate a node manually with MAC:
+#   kubectl annotate node <node-name> cba.dev/mac-address-override=aa:bb:cc:dd:ee:ff

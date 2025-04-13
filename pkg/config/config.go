@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -44,10 +45,11 @@ type Config struct {
 	ShutdownManager     ShutdownManagerConfig     `yaml:"shutdownManager"`
 	ShutdownMode        string                    `yaml:"shutdownMode"` // supported: "http", "disabled"
 
-	PowerOnMode       string         `yaml:"powerOnMode"` // "disabled", "wol"
-	WOLBroadcastAddr  string         `yaml:"wolBroadcastAddr"`
-	WOLBootTimeoutSec int            `yaml:"wolBootTimeoutSeconds"`
-	WolAgent          WolAgentConfig `yaml:"wolAgent"`
+	PowerOnMode          string         `yaml:"powerOnMode"` // "disabled", "wol"
+	WOLBroadcastAddr     string         `yaml:"wolBroadcastAddr"`
+	WOLBootTimeoutSec    int            `yaml:"wolBootTimeoutSeconds"`
+	WolAgent             WolAgentConfig `yaml:"wolAgent"`
+	MACDiscoveryInterval time.Duration  `yaml:"macDiscoveryIntervalMin"`
 }
 
 type LoadAverageStrategyConfig struct {
@@ -79,10 +81,29 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var cfg Config
-	err = yaml.Unmarshal(data, &cfg)
-	if err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+func (cfg *Config) ApplyDefaultsAndValidate() error {
+	if cfg.MACDiscoveryInterval == 0 {
+		cfg.MACDiscoveryInterval = 30 * time.Minute
+	}
+
+	if cfg.MACDiscoveryInterval < 10*time.Second {
+		return fmt.Errorf("macDiscoveryInterval too short: %s", cfg.MACDiscoveryInterval)
+	}
+
+	// Add more defaults/validations here later
+
+	return nil
 }

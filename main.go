@@ -16,6 +16,7 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/kubeclient"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/tracing"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 )
 
 var version = "dev"
@@ -107,6 +108,17 @@ func main() {
 	if dryRunClusterLoadUp >= 0 {
 		opts = append(opts, controller.WithDryRunClusterLoadUp(dryRunClusterLoadUp))
 	}
+
+	go nodeops.StartMACAnnotationUpdater(clientset, nodeops.MACUpdaterConfig{
+		DryRun:        cfg.DryRun,
+		ManagedLabel:  cfg.NodeLabels.Managed,
+		DisabledLabel: cfg.NodeLabels.Disabled,
+		IgnoreLabels:  cfg.IgnoreLabels,
+		Interval:      cfg.MACDiscoveryInterval,
+		Namespace:     cfg.ShutdownManager.Namespace,
+		PodLabel:      cfg.ShutdownManager.PodLabel,
+		Port:          cfg.ShutdownManager.Port,
+	})
 
 	r := controller.NewReconciler(cfg, clientset, metricsClient, opts...)
 	ctx := context.Background()
