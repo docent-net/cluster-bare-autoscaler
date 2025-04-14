@@ -9,7 +9,6 @@ import (
 
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
-	"math/rand"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -209,65 +208,36 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 }
 
 func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []v1.Node {
-	eligible := r.getEligibleNodes(nodes)
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.cfg.Cooldown,
+		BootCooldown: r.cfg.BootCooldown,
+		IgnoreLabels: r.cfg.IgnoreLabels,
+	})
 	slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(nodes))
 	return eligible
 }
 
 func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
-	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	nodes, err := nodeops.ListManagedNodes(ctx, r.client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.cfg.NodeLabels.Managed,
+		DisabledLabel: r.cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.cfg.IgnoreLabels,
+	})
 	if err != nil {
-		slog.Error("failed to list nodes", "err", err)
+		slog.Error("failed to list managed nodes", "err", err)
 		return nil, err
 	}
-	return nodes, nil
+	return &v1.NodeList{Items: nodes}, nil
 }
 
 func (r *Reconciler) listActiveNodes(ctx context.Context) ([]v1.Node, error) {
-	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	var active []v1.Node
-	for _, node := range nodes.Items {
-		// Skip cordoned nodes
-		if node.Spec.Unschedulable {
-			continue
-		}
-
-		// Skip ignored labels
-		skip := false
-		for k, v := range r.cfg.IgnoreLabels {
-			if nodeVal, ok := node.Labels[k]; ok && nodeVal == v {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-
-		// Skip nodes with annotationPoweredOff
-		if val, ok := node.Annotations[nodeops.AnnotationPoweredOff]; ok && val == "true" {
-			continue
-		}
-
-		// Skip nodes marked as powered-off in state tracker
-		if r.state.IsPoweredOff(node.Name) {
-			continue
-		}
-
-		// Must be Ready
-		for _, cond := range node.Status.Conditions {
-			if cond.Type == v1.NodeReady && cond.Status == v1.ConditionTrue {
-				active = append(active, node)
-				break
-			}
-		}
-	}
-
-	return active, nil
+	return nodeops.ListActiveNodes(ctx, r.client, r.state, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.cfg.NodeLabels.Managed,
+		DisabledLabel: r.cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.cfg.IgnoreLabels,
+	}, nodeops.ActiveNodeFilter{
+		IgnoreLabels: r.cfg.IgnoreLabels,
+	})
 }
 
 func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
@@ -426,61 +396,6 @@ func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName str
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, nodeops.AnnotationPoweredOff))
 	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
-}
-
-func (r *Reconciler) getEligibleNodes(all []v1.Node) []v1.Node {
-	var eligible []v1.Node
-	for _, node := range all {
-		skip := false
-		for key, val := range r.cfg.IgnoreLabels {
-			if nodeVal, ok := node.Labels[key]; ok && nodeVal == val {
-				slog.Info("Skipping node due to ignoreLabels", "node", node.Name, "label", key)
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			if val, ok := node.Annotations[nodeops.AnnotationPoweredOff]; ok && val == "true" {
-				slog.Info("Skipping node marked as powered-off (annotation)", "node", node.Name)
-				continue
-			}
-
-			if node.Spec.Unschedulable {
-				slog.Info("Skipping node because it is already cordoned", "node", node.Name)
-				continue
-			}
-
-			now := time.Now()
-			if r.state.IsInCooldown(node.Name, now, r.cfg.Cooldown) {
-				slog.Info("Skipping node due to shutdown cooldown", "node", node.Name)
-				continue
-			}
-			if r.state.IsBootCooldownActive(node.Name, now, r.cfg.BootCooldown) {
-				slog.Info("Skipping node due to boot cooldown", "node", node.Name)
-				continue
-			}
-
-			if r.state.IsPoweredOff(node.Name) {
-				slog.Info("Skipping node: already powered off", "node", node.Name)
-				continue
-			}
-
-			if r.state.IsBootCooldownActive(node.Name, time.Now(), r.cfg.BootCooldown) {
-				slog.Info("Skipping node due to boot cooldown", "node", node.Name)
-				continue
-			}
-
-			eligible = append(eligible, node)
-		}
-	}
-
-	// Shuffle to avoid always picking the same node
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(eligible), func(i, j int) {
-		eligible[i], eligible[j] = eligible[j], eligible[i]
-	})
-
-	return eligible
 }
 
 func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {

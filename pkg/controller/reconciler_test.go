@@ -36,7 +36,11 @@ func TestGetEligibleNodes_Shuffling(t *testing.T) {
 	pickedLast := map[string]bool{}
 
 	for i := 0; i < 100; i++ {
-		eligible := r.getEligibleNodes(nodes)
+		eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
+			Cooldown:     r.cfg.Cooldown,
+			BootCooldown: r.cfg.BootCooldown,
+			IgnoreLabels: r.cfg.IgnoreLabels,
+		})
 		last := eligible[len(eligible)-1].Name
 		pickedLast[last] = true
 		if len(pickedLast) >= 3 {
@@ -73,7 +77,11 @@ func TestGetEligibleNodes(t *testing.T) {
 		makeNode("node2", map[string]string{}),
 	}
 
-	eligible := r.getEligibleNodes(nodes)
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.cfg.Cooldown,
+		BootCooldown: r.cfg.BootCooldown,
+		IgnoreLabels: r.cfg.IgnoreLabels,
+	})
 	if len(eligible) != 2 {
 		t.Errorf("expected 2 eligible nodes, got %d", len(eligible))
 	}
@@ -119,7 +127,11 @@ func TestCooldownExclusion(t *testing.T) {
 	state.SetShutdownTime("node1", time.Now().Add(-1*time.Minute))
 
 	nodes := []v1.Node{node}
-	eligible := r.getEligibleNodes(nodes)
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.cfg.Cooldown,
+		BootCooldown: r.cfg.BootCooldown,
+		IgnoreLabels: r.cfg.IgnoreLabels,
+	})
 	if len(eligible) != 0 {
 		t.Errorf("expected 0 eligible nodes due to cooldown, got %d", len(eligible))
 	}
@@ -134,7 +146,11 @@ func TestPoweredOffNodeIsExcluded(t *testing.T) {
 	r.state.MarkPoweredOff("node2")
 
 	nodes := []v1.Node{node}
-	eligible := r.getEligibleNodes(nodes)
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.cfg.Cooldown,
+		BootCooldown: r.cfg.BootCooldown,
+		IgnoreLabels: r.cfg.IgnoreLabels,
+	})
 	if len(eligible) != 0 {
 		t.Errorf("expected 0 eligible nodes due to powered-off status, got %d", len(eligible))
 	}
