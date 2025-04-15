@@ -161,3 +161,32 @@ func TestFilterShutdownEligibleNodes(t *testing.T) {
 		t.Errorf("expected only 'ok' node to be eligible, got: %+v", eligible)
 	}
 }
+
+func TestWrapNodes(t *testing.T) {
+	nodes := []v1.Node{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node-a",
+				Annotations: map[string]string{nodeops.AnnotationMACManual: "11:22:33:44:55:66"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node-b",
+				Annotations: map[string]string{nodeops.AnnotationMACAuto: "aa:bb:cc:dd:ee:ff"},
+			},
+		},
+	}
+
+	wrapped := nodeops.WrapNodes(nodes, nodeops.NewNodeStateTracker(), time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+
+	if len(wrapped) != 2 {
+		t.Fatalf("expected 2 wrapped nodes, got %d", len(wrapped))
+	}
+	if !wrapped[0].HasManualMACOverride() {
+		t.Errorf("expected node-a to have manual MAC override")
+	}
+	if !wrapped[1].HasDiscoveredMACAddr() {
+		t.Errorf("expected node-b to have discovered MAC address")
+	}
+}

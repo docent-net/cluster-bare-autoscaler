@@ -110,8 +110,16 @@ func (s *NodeStateTracker) IsBootCooldownActive(node string, now time.Time, cool
 	return now.Sub(last) < cooldown
 }
 
-func (s *NodeStateTracker) SetShutdownTime(nodeName string, t time.Time) {
+// SetShutdownTime sets the shutdown timestamp manually (for testing only).
+func (s *NodeStateTracker) SetShutdownTime(node string, t time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.shutdownTimestamps[nodeName] = t
+	s.shutdownTimestamps[node] = t
+}
+
+// SetBootTime sets the boot timestamp manually (for testing only).
+func (s *NodeStateTracker) SetBootTime(node string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bootTimestamps[node] = t
 }

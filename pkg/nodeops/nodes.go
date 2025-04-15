@@ -19,6 +19,22 @@ type ManagedNodeFilter struct {
 
 const AnnotationPoweredOff = "cba.dev/was-powered-off"
 
+// WrapNodes transforms a list of v1.Node objects into []*NodeWrapper.
+//
+// Unlike the NodeWrapper itself, which encapsulates behavior and metadata for a single node,
+// this helper constructs a wrapped view of all nodes in one step, injecting shared context like
+// state tracker, timestamp (`now`), MAC annotation config, and ignore label rules.
+//
+// It is purely a utility — not tied to any method on NodeWrapper — and is intended to make
+// downstream logic cleaner when operating on node collections.
+func WrapNodes(nodes []v1.Node, state *NodeStateTracker, now time.Time, cfg NodeAnnotationConfig, ignore map[string]string) []*NodeWrapper {
+	var result []*NodeWrapper
+	for i := range nodes {
+		result = append(result, NewNodeWrapper(&nodes[i], state, now, cfg, ignore))
+	}
+	return result
+}
+
 // ListManagedNodes returns all nodes with the specified managed label = "true",
 // skips nodes with the disabled label = "true", and any node that matches any ignoreLabels.
 func ListManagedNodes(ctx context.Context, client kubernetes.Interface, filter ManagedNodeFilter) ([]v1.Node, error) {
@@ -78,36 +94,20 @@ func ListActiveNodes(ctx context.Context, client kubernetes.Interface, tracker *
 	}
 
 	var active []v1.Node
-outer:
-	for _, node := range nodes {
-		// Skip unschedulable
-		if node.Spec.Unschedulable {
+	wrapped := WrapNodes(nodes, tracker, time.Now(), NodeAnnotationConfig{}, extraFilter.IgnoreLabels)
+
+	for _, node := range wrapped {
+		if node.IsCordoned() {
 			continue
 		}
-
-		// Skip ignored labels
-		for k, v := range extraFilter.IgnoreLabels {
-			if val, ok := node.Labels[k]; ok && val == v {
-				continue outer
-			}
-		}
-
-		// Skip annotation-based powered off
-		if val, ok := node.Annotations[AnnotationPoweredOff]; ok && val == "true" {
+		if node.IsIgnored() {
 			continue
 		}
-
-		// Skip state-tracked powered off
-		if tracker.IsPoweredOff(node.Name) {
+		if node.IsMarkedPoweredOff() {
 			continue
 		}
-
-		// Must be Ready
-		for _, cond := range node.Status.Conditions {
-			if cond.Type == v1.NodeReady && cond.Status == v1.ConditionTrue {
-				active = append(active, node)
-				break
-			}
+		if node.IsReady() {
+			active = append(active, *node.Node)
 		}
 	}
 
@@ -127,45 +127,32 @@ type EligibilityConfig struct {
 // - not in cooldown
 func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now time.Time, cfg EligibilityConfig) []v1.Node {
 	var eligible []v1.Node
+	wrapped := WrapNodes(nodes, state, now, NodeAnnotationConfig{}, cfg.IgnoreLabels)
 
-outer:
-	for _, node := range nodes {
-		for key, val := range cfg.IgnoreLabels {
-			if nodeVal, ok := node.Labels[key]; ok && nodeVal == val {
-				slog.Info("Skipping node due to ignoreLabels", "node", node.Name, "label", key)
-				continue outer
-			}
-		}
-
-		if val, ok := node.Annotations[AnnotationPoweredOff]; ok && val == "true" {
-			slog.Info("Skipping node marked as powered-off (annotation)", "node", node.Name)
+	for _, node := range wrapped {
+		if node.IsIgnored() {
+			slog.Info("Skipping node due to ignoreLabels", "node", node.Name)
 			continue
 		}
-
-		if node.Spec.Unschedulable {
-			slog.Info("Skipping node because it is already cordoned", "node", node.Name)
+		if node.IsMarkedPoweredOff() {
+			slog.Info("Skipping node marked as powered off", "node", node.Name)
 			continue
 		}
-
-		if state.IsInCooldown(node.Name, now, cfg.Cooldown) {
+		if node.IsCordoned() {
+			slog.Info("Skipping node because it is cordoned", "node", node.Name)
+			continue
+		}
+		if node.IsInShutdownCooldown(cfg.Cooldown) {
 			slog.Info("Skipping node due to shutdown cooldown", "node", node.Name)
 			continue
 		}
-
-		if state.IsBootCooldownActive(node.Name, now, cfg.BootCooldown) {
+		if node.IsInBootCooldown(cfg.BootCooldown) {
 			slog.Info("Skipping node due to boot cooldown", "node", node.Name)
 			continue
 		}
-
-		if state.IsPoweredOff(node.Name) {
-			slog.Info("Skipping node: already powered off", "node", node.Name)
-			continue
-		}
-
-		eligible = append(eligible, node)
+		eligible = append(eligible, *node.Node)
 	}
 
-	// Shuffle to avoid always picking the same node
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(eligible), func(i, j int) {
 		eligible[i], eligible[j] = eligible[j], eligible[i]

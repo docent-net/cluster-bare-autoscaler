@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"log/slog"
 	"net/http"
@@ -59,12 +57,19 @@ func RunOnce(client kubernetes.Interface, cfg MACUpdaterConfig) {
 		return
 	}
 
-	for _, node := range nodes {
-		if node.Annotations[AnnotationMACManual] != "" {
+	now := time.Now()
+
+	for _, rawNode := range nodes {
+		node := NewNodeWrapper(&rawNode, nil, now, NodeAnnotationConfig{}, nil)
+
+		// Skip if manual override is set
+		if node.HasManualMACOverride() {
 			slog.Debug("Skipping MAC update for node with manual override", "node", node.Name)
 			continue
 		}
-		if node.Annotations[AnnotationMACAuto] != "" {
+
+		// Skip if already has MAC discovered
+		if node.HasDiscoveredMACAddr() {
 			slog.Debug("Skipping MAC update for node with existing auto annotation", "node", node.Name)
 			continue
 		}
@@ -83,15 +88,7 @@ func RunOnce(client kubernetes.Interface, cfg MACUpdaterConfig) {
 
 		slog.Debug("Discovered MAC address", "node", node.Name, "mac", mac)
 
-		if cfg.DryRun {
-			slog.Debug("Dry-run: would annotate MAC address", "node", node.Name, "mac", mac)
-			continue
-		}
-
-		patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, AnnotationMACAuto, mac))
-		_, err = client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-		if err != nil {
-			slog.Warn("MAC updater: failed to patch node with MAC", "node", node.Name, "err", err)
+		if err := node.SetDiscoveredMAC(ctx, client, mac, cfg.DryRun); err != nil {
 			continue
 		}
 
