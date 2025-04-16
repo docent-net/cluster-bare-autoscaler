@@ -52,6 +52,21 @@ var (
 	})
 )
 
+type Interface interface {
+	RecordEligibleNodes(int)
+	RecordChosenNode(string)
+}
+
+type DefaultMetrics struct{}
+
+func (d *DefaultMetrics) RecordEligibleNodes(_ int) {
+	// testing
+}
+
+func (d *DefaultMetrics) RecordChosenNode(_ string) {
+	// testing
+}
+
 func Init() {
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(":9090", nil)

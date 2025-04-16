@@ -13,7 +13,7 @@ import (
 )
 
 type ResourceAwareScaleDown struct {
-	Client        *kubernetes.Clientset
+	Client        kubernetes.Interface
 	Cfg           *config.Config
 	NodeLister    func(context.Context) ([]v1.Node, error)
 	PodLister     func(context.Context) ([]v1.Pod, error)

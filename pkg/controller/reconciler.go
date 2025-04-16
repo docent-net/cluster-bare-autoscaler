@@ -23,28 +23,29 @@ import (
 )
 
 type Reconciler struct {
-	cfg                   *config.Config
-	client                *kubernetes.Clientset
-	shutdowner            power.ShutdownController
-	powerOner             power.PowerOnController
-	state                 *nodeops.NodeStateTracker
-	scaleDownStrategy     strategy.ScaleDownStrategy
-	scaleUpStrategy       strategy.ScaleUpStrategy
-	dryRunNodeLoad        *float64 // optional CLI override
-	dryRunClusterLoadDown *float64 // CLI override for scale-down
-	dryRunClusterLoadUp   *float64 // CLI override for scale-up
+	Cfg                   *config.Config
+	Client                kubernetes.Interface
+	Shutdowner            power.ShutdownController
+	PowerOner             power.PowerOnController
+	State                 *nodeops.NodeStateTracker
+	Metrics               metrics.Interface
+	ScaleDownStrategy     strategy.ScaleDownStrategy
+	ScaleUpStrategy       strategy.ScaleUpStrategy
+	DryRunNodeLoad        *float64 // optional CLI override
+	DryRunClusterLoadDown *float64 // CLI override for scale-down
+	DryRunClusterLoadUp   *float64 // CLI override for scale-up
 }
 
 type ReconcilerOption func(r *Reconciler)
 
-func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, opts ...ReconcilerOption) *Reconciler {
+func NewReconciler(cfg *config.Config, client kubernetes.Interface, metricsClient metricsclient.Interface, opts ...ReconcilerOption) *Reconciler {
 	shutdowner, powerOner := power.NewControllersFromConfig(cfg, client)
 	r := &Reconciler{
-		cfg:        cfg,
-		client:     client,
-		state:      nodeops.NewNodeStateTracker(),
-		shutdowner: shutdowner,
-		powerOner:  powerOner,
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: shutdowner,
+		PowerOner:  powerOner,
 	}
 
 	// Apply options
@@ -52,8 +53,8 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 		opt(r)
 	}
 
-	r.scaleDownStrategy = buildScaleDownStrategy(cfg, client, metricsClient, r)
-	r.scaleUpStrategy = buildScaleUpStrategy(cfg, r)
+	r.ScaleDownStrategy = buildScaleDownStrategy(cfg, client, metricsClient, r)
+	r.ScaleUpStrategy = buildScaleUpStrategy(cfg, r)
 
 	r.restorePoweredOffState(context.Background())
 	return r
@@ -64,7 +65,7 @@ func NewReconciler(cfg *config.Config, client *kubernetes.Clientset, metricsClie
 // If LoadAverageStrategy is enabled, it adds LoadAverageScaleDown, which shuts down nodes
 // based on normalized per-node and cluster-wide load averages.
 // Supports dry-run overrides and evaluates multiple strategies using a MultiStrategy chain.
-func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, metricsClient metricsclient.Interface, r *Reconciler) strategy.ScaleDownStrategy {
+func buildScaleDownStrategy(cfg *config.Config, client kubernetes.Interface, metricsClient metricsclient.Interface, r *Reconciler) strategy.ScaleDownStrategy {
 	var strategies []strategy.ScaleDownStrategy
 
 	strategies = append(strategies, &strategy.ResourceAwareScaleDown{
@@ -97,8 +98,8 @@ func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, me
 			HTTPTimeout:               time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
 			NodeThreshold:             cfg.LoadAverageStrategy.NodeThreshold,
 			ClusterWideThreshold:      cfg.LoadAverageStrategy.ScaleDownThreshold,
-			DryRunNodeLoadOverride:    r.dryRunNodeLoad,
-			DryRunClusterLoadOverride: r.dryRunClusterLoadDown,
+			DryRunNodeLoadOverride:    r.DryRunNodeLoad,
+			DryRunClusterLoadOverride: r.DryRunClusterLoadDown,
 			IgnoreLabels:              cfg.IgnoreLabels,
 			ClusterEvalMode:           strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 		})
@@ -121,7 +122,7 @@ func buildScaleDownStrategy(cfg *config.Config, client *kubernetes.Clientset, me
 func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStrategy {
 	upStrategies := []strategy.ScaleUpStrategy{
 		&strategy.MinNodeCountScaleUp{
-			Cfg:          r.cfg,
+			Cfg:          r.Cfg,
 			ActiveNodes:  r.listActiveNodes,
 			ShutdownList: r.shutdownNodeNames,
 		},
@@ -129,14 +130,14 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 
 	if cfg.LoadAverageStrategy.Enabled {
 		upStrategies = append(upStrategies, &strategy.LoadAverageScaleUp{
-			Client:               r.client,
+			Client:               r.Client,
 			Namespace:            cfg.LoadAverageStrategy.Namespace,
 			PodLabel:             cfg.LoadAverageStrategy.PodLabel,
 			HTTPPort:             cfg.LoadAverageStrategy.Port,
 			HTTPTimeout:          time.Duration(cfg.LoadAverageStrategy.TimeoutSeconds) * time.Second,
 			ClusterEvalMode:      strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 			ClusterWideThreshold: cfg.LoadAverageStrategy.ScaleUpThreshold,
-			DryRunOverride:       r.dryRunClusterLoadUp,
+			DryRunOverride:       r.DryRunClusterLoadUp,
 			IgnoreLabels:         cfg.IgnoreLabels,
 			ShutdownCandidates:   r.shutdownNodeNames,
 		})
@@ -153,8 +154,8 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	now := time.Now()
-	if r.state.IsGlobalCooldownActive(now, r.cfg.Cooldown) {
-		remaining := r.cfg.Cooldown - now.Sub(r.state.LastShutdownTime)
+	if r.State.IsGlobalCooldownActive(now, r.Cfg.Cooldown) {
+		remaining := r.Cfg.Cooldown - now.Sub(r.State.LastShutdownTime)
 		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining.Round(time.Second).String())
 		return nil
 	}
@@ -172,15 +173,15 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 
 	eligible := r.filterEligibleNodes(ctx, allNodes.Items)
-	r.maybeScaleDown(ctx, eligible)
+	r.MaybeScaleDown(ctx, eligible)
 
 	return nil
 }
 
 func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
-	nodeList, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	nodeList, err := r.Client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		slog.Warn("Failed to list nodes while restoring powered-off state", "err", err)
+		slog.Warn("Failed to list nodes while restoring powered-off State", "err", err)
 		return
 	}
 
@@ -190,10 +191,10 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 		active[node.Name] = struct{}{}
 	}
 
-	managed, err := nodeops.ListManagedNodes(ctx, r.client, nodeops.ManagedNodeFilter{
-		ManagedLabel:  r.cfg.NodeLabels.Managed,
-		DisabledLabel: r.cfg.NodeLabels.Disabled,
-		IgnoreLabels:  r.cfg.IgnoreLabels,
+	managed, err := nodeops.ListManagedNodes(ctx, r.Client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.Cfg.NodeLabels.Managed,
+		DisabledLabel: r.Cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.Cfg.IgnoreLabels,
 	})
 	if err != nil {
 		slog.Warn("Failed to list managed nodes during restore", "err", err)
@@ -202,26 +203,26 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 	for _, node := range managed {
 		if _, found := active[node.Name]; !found {
 			slog.Info("Managed node not found in active set — assuming powered off", "node", node.Name)
-			r.state.MarkPoweredOff(node.Name)
+			r.State.MarkPoweredOff(node.Name)
 		}
 	}
 }
 
-func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []v1.Node {
-	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
-		Cooldown:     r.cfg.Cooldown,
-		BootCooldown: r.cfg.BootCooldown,
-		IgnoreLabels: r.cfg.IgnoreLabels,
+func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []*nodeops.NodeWrapper {
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.Cfg.Cooldown,
+		BootCooldown: r.Cfg.BootCooldown,
+		IgnoreLabels: r.Cfg.IgnoreLabels,
 	})
 	slog.Info("Filtered nodes", "eligible", len(eligible), "total", len(nodes))
 	return eligible
 }
 
 func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
-	nodes, err := nodeops.ListManagedNodes(ctx, r.client, nodeops.ManagedNodeFilter{
-		ManagedLabel:  r.cfg.NodeLabels.Managed,
-		DisabledLabel: r.cfg.NodeLabels.Disabled,
-		IgnoreLabels:  r.cfg.IgnoreLabels,
+	nodes, err := nodeops.ListManagedNodes(ctx, r.Client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.Cfg.NodeLabels.Managed,
+		DisabledLabel: r.Cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.Cfg.IgnoreLabels,
 	})
 	if err != nil {
 		slog.Error("failed to list managed nodes", "err", err)
@@ -231,21 +232,21 @@ func (r *Reconciler) listAllNodes(ctx context.Context) (*v1.NodeList, error) {
 }
 
 func (r *Reconciler) listActiveNodes(ctx context.Context) ([]v1.Node, error) {
-	return nodeops.ListActiveNodes(ctx, r.client, r.state, nodeops.ManagedNodeFilter{
-		ManagedLabel:  r.cfg.NodeLabels.Managed,
-		DisabledLabel: r.cfg.NodeLabels.Disabled,
-		IgnoreLabels:  r.cfg.IgnoreLabels,
+	return nodeops.ListActiveNodes(ctx, r.Client, r.State, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.Cfg.NodeLabels.Managed,
+		DisabledLabel: r.Cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.Cfg.IgnoreLabels,
 	}, nodeops.ActiveNodeFilter{
-		IgnoreLabels: r.cfg.IgnoreLabels,
+		IgnoreLabels: r.Cfg.IgnoreLabels,
 	})
 }
 
 func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
-	nodes, err := nodeops.ListShutdownNodeNames(ctx, r.client, nodeops.ManagedNodeFilter{
-		ManagedLabel:  r.cfg.NodeLabels.Managed,
-		DisabledLabel: r.cfg.NodeLabels.Disabled,
-		IgnoreLabels:  r.cfg.IgnoreLabels,
-	}, r.state)
+	nodes, err := nodeops.ListShutdownNodeNames(ctx, r.Client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.Cfg.NodeLabels.Managed,
+		DisabledLabel: r.Cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.Cfg.IgnoreLabels,
+	}, r.State)
 
 	if err != nil {
 		slog.Warn("Failed to list shutdown nodes", "err", err)
@@ -255,29 +256,29 @@ func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
 }
 
 func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
-	nodeName, shouldScale, err := r.scaleUpStrategy.ShouldScaleUp(ctx)
+	nodeName, shouldScale, err := r.ScaleUpStrategy.ShouldScaleUp(ctx)
 	if err != nil {
 		slog.Error("Scale-up strategy error", "err", err)
 		return false
 	}
 	if !shouldScale {
-		slog.Info("No scale-up possible", "reason", "all strategies denied", "minNodes", r.cfg.MinNodes)
+		slog.Info("No scale-up possible", "reason", "all strategies denied", "minNodes", r.Cfg.MinNodes)
 		return false
 	}
 
 	slog.Info("Attempting scale-up", "node", nodeName)
-	err = r.powerOner.PowerOn(ctx, nodeName)
+	err = r.PowerOner.PowerOn(ctx, nodeName)
 	if err != nil {
 		slog.Error("PowerOn failed", "node", nodeName, "err", err)
 		return false
 	}
 
 	slog.Info("Scale-up triggered", "node", nodeName)
-	r.state.ClearPoweredOff(nodeName)
+	r.State.ClearPoweredOff(nodeName)
 	metrics.PoweredOffNodes.WithLabelValues(nodeName).Set(0)
 
 	// Uncordon node
-	if err := r.uncordonNode(ctx, nodeName); err != nil {
+	if err := r.UncordonNode(ctx, nodeName); err != nil {
 		slog.Warn("Failed to uncordon node after power-on", "node", nodeName, "err", err)
 		return false
 	}
@@ -287,14 +288,14 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 		slog.Warn("Failed to clear powered-off annotation", "node", nodeName, "err", err)
 	}
 
-	r.state.MarkGlobalShutdown()
-	r.state.MarkBooted(nodeName)
+	r.State.MarkGlobalShutdown()
+	r.State.MarkBooted(nodeName)
 
 	return true // scale-up action performed
 }
 
-func (r *Reconciler) uncordonNode(ctx context.Context, nodeName string) error {
-	node, err := r.client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+func (r *Reconciler) UncordonNode(ctx context.Context, nodeName string) error {
+	node, err := r.Client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get node for uncordon: %w", err)
 	}
@@ -307,12 +308,12 @@ func (r *Reconciler) uncordonNode(ctx context.Context, nodeName string) error {
 	updated := node.DeepCopy()
 	updated.Spec.Unschedulable = false
 
-	if r.cfg.DryRun {
+	if r.Cfg.DryRun {
 		slog.Debug("Dry-run: would uncordon node", "node", nodeName)
 		return nil
 	}
 
-	_, err = r.client.CoreV1().Nodes().Update(ctx, updated, metav1.UpdateOptions{})
+	_, err = r.Client.CoreV1().Nodes().Update(ctx, updated, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to uncordon node: %w", err)
 	}
@@ -321,14 +322,14 @@ func (r *Reconciler) uncordonNode(ctx context.Context, nodeName string) error {
 	return nil
 }
 
-func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) bool {
-	candidate := r.pickScaleDownCandidate(eligible)
+func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.NodeWrapper) bool {
+	candidate := r.PickScaleDownCandidate(eligible)
 	if candidate == nil {
-		slog.Info("No scale-down possible", "eligible", len(eligible), "minNodes", r.cfg.MinNodes)
+		slog.Info("No scale-down possible", "eligible", len(eligible), "minNodes", r.Cfg.MinNodes)
 		return false
 	}
 
-	ok, err := r.scaleDownStrategy.
+	ok, err := r.ScaleDownStrategy.
 		ShouldScaleDown(ctx, candidate.Name)
 	if err != nil {
 		slog.Error("Scale-down strategy failed", "err", err)
@@ -350,12 +351,12 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		return false
 	}
 
-	if err := r.annotatePoweredOffNode(ctx, candidate.Name); err != nil {
+	if err := r.annotatePoweredOffNode(ctx, candidate); err != nil {
 		slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
 	}
 
 	metrics.ShutdownAttempts.Inc()
-	if err := r.shutdowner.Shutdown(ctx, candidate.Name); err != nil {
+	if err := r.Shutdowner.Shutdown(ctx, candidate.Name); err != nil {
 		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
 		if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
 			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
@@ -364,50 +365,50 @@ func (r *Reconciler) maybeScaleDown(ctx context.Context, eligible []v1.Node) boo
 		slog.Info("Shutdown initiated", "node", candidate.Name)
 		metrics.ShutdownSuccesses.Inc()
 		metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
-		r.state.MarkGlobalShutdown()
+		r.State.MarkGlobalShutdown()
 	}
 
-	if !r.cfg.DryRun {
-		r.state.MarkShutdown(candidate.Name)
-		r.state.MarkPoweredOff(candidate.Name)
+	if !r.Cfg.DryRun {
+		r.State.MarkShutdown(candidate.Name)
+		r.State.MarkPoweredOff(candidate.Name)
 	}
 
 	return true
 }
 
-func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, nodeName string) error {
-	if r.cfg.DryRun {
-		slog.Debug("Dry-run: would annotate node as powered-off", "node", nodeName)
+func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, node *nodeops.NodeWrapper) error {
+	if r.Cfg.DryRun {
+		slog.Debug("Dry-run: would annotate node as powered-off", "node", node.Name)
 		return nil
 	}
-	slog.Debug("Annotating node as powered-off", "node", nodeName)
-	timestamp := time.Now().UTC().Format(time.RFC3339)
+	slog.Debug("Annotating node as powered-off", "node", node.Name)
+	timestamp := metav1.Now().UTC().Format("2006-01-02T15:04:05Z")
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp))
-	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
+	_, err := r.Client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 
 func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName string) error {
-	if r.cfg.DryRun {
+	if r.Cfg.DryRun {
 		slog.Debug("Dry-run: would clear powered-off annotation", "node", nodeName)
 		return nil
 	}
 	slog.Debug("Clearing powered-off annotation", "node", nodeName)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, nodeops.AnnotationPoweredOff))
-	_, err := r.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
+	_, err := r.Client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 
-func (r *Reconciler) pickScaleDownCandidate(eligible []v1.Node) *v1.Node {
-	if len(eligible) <= r.cfg.MinNodes {
+func (r *Reconciler) PickScaleDownCandidate(eligible []*nodeops.NodeWrapper) *nodeops.NodeWrapper {
+	if len(eligible) <= r.Cfg.MinNodes {
 		return nil
 	}
-	return &eligible[len(eligible)-1]
+	return eligible[len(eligible)-1]
 }
 
-func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
+func (r *Reconciler) cordonAndDrain(ctx context.Context, node *nodeops.NodeWrapper) error {
 	// Step 1: Cordon
-	latest, err := r.client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	latest, err := r.Client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	if err != nil {
 		slog.Error("failed to refetch node before cordon", "node", node.Name, "err", err)
 		return err
@@ -416,10 +417,10 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 	latestCopy := latest.DeepCopy()
 	latestCopy.Spec.Unschedulable = true
 
-	if r.cfg.DryRun {
+	if r.Cfg.DryRun {
 		slog.Info("Dry-run: would cordon node", "node", node.Name)
 	} else {
-		_, err = r.client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
+		_, err = r.Client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
@@ -427,7 +428,7 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 	}
 
 	// Step 2: List pods on node
-	pods, err := r.client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+	pods, err := r.Client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + node.Name,
 	})
 	if err != nil {
@@ -455,13 +456,12 @@ func (r *Reconciler) cordonAndDrain(ctx context.Context, node *v1.Node) error {
 			DeleteOptions: &metav1.DeleteOptions{},
 		}
 
-		if r.cfg.DryRun {
+		if r.Cfg.DryRun {
 			slog.Info("Dry-run: would evict pod", "pod", pod.Name, "ns", pod.Namespace)
 		} else {
-			err := r.client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
+			err := r.Client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
 			if err != nil {
 				slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
-				metrics.EvictionFailures.Inc()
 				return errors.New("aborting drain due to eviction failure")
 			}
 			slog.Info("Evicted pod", "pod", pod.Name, "ns", pod.Namespace)

@@ -125,8 +125,8 @@ type EligibilityConfig struct {
 // - not marked powered-off
 // - not cordoned
 // - not in cooldown
-func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now time.Time, cfg EligibilityConfig) []v1.Node {
-	var eligible []v1.Node
+func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now time.Time, cfg EligibilityConfig) []*NodeWrapper {
+	var eligible []*NodeWrapper
 	wrapped := WrapNodes(nodes, state, now, NodeAnnotationConfig{}, cfg.IgnoreLabels)
 
 	for _, node := range wrapped {
@@ -150,7 +150,7 @@ func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now t
 			slog.Info("Skipping node due to boot cooldown", "node", node.Name)
 			continue
 		}
-		eligible = append(eligible, *node.Node)
+		eligible = append(eligible, node)
 	}
 
 	rand.Seed(time.Now().UnixNano())

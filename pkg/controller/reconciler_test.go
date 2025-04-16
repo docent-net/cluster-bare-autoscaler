@@ -1,6 +1,7 @@
-package controller
+package controller_test
 
 import (
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/controller"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"testing"
 	"time"
@@ -8,6 +9,10 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"context"
+
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func makeNode(name string, labels map[string]string) v1.Node {
@@ -19,10 +24,18 @@ func makeNode(name string, labels map[string]string) v1.Node {
 	}
 }
 
+type mockScaleDownStrategy struct{}
+
+func (m *mockScaleDownStrategy) ShouldScaleDown(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+
+func (m *mockScaleDownStrategy) Name() string { return "mock" }
+
 func TestGetEligibleNodes_Shuffling(t *testing.T) {
-	r := &Reconciler{
-		cfg:   mockConfig(),
-		state: nodeops.NewNodeStateTracker(),
+	r := &controller.Reconciler{
+		Cfg:   mockConfig(),
+		State: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -36,10 +49,10 @@ func TestGetEligibleNodes_Shuffling(t *testing.T) {
 	pickedLast := map[string]bool{}
 
 	for i := 0; i < 100; i++ {
-		eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
-			Cooldown:     r.cfg.Cooldown,
-			BootCooldown: r.cfg.BootCooldown,
-			IgnoreLabels: r.cfg.IgnoreLabels,
+		eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
+			Cooldown:     r.Cfg.Cooldown,
+			BootCooldown: r.Cfg.BootCooldown,
+			IgnoreLabels: r.Cfg.IgnoreLabels,
 		})
 		last := eligible[len(eligible)-1].Name
 		pickedLast[last] = true
@@ -66,9 +79,9 @@ func TestGetEligibleNodes(t *testing.T) {
 			"node-role.kubernetes.io/control-plane": "",
 		},
 	}
-	r := &Reconciler{
-		cfg:   cfg,
-		state: nodeops.NewNodeStateTracker(),
+	r := &controller.Reconciler{
+		Cfg:   cfg,
+		State: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -77,10 +90,10 @@ func TestGetEligibleNodes(t *testing.T) {
 		makeNode("node2", map[string]string{}),
 	}
 
-	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
-		Cooldown:     r.cfg.Cooldown,
-		BootCooldown: r.cfg.BootCooldown,
-		IgnoreLabels: r.cfg.IgnoreLabels,
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.Cfg.Cooldown,
+		BootCooldown: r.Cfg.BootCooldown,
+		IgnoreLabels: r.Cfg.IgnoreLabels,
 	})
 	if len(eligible) != 2 {
 		t.Errorf("expected 2 eligible nodes, got %d", len(eligible))
@@ -91,9 +104,9 @@ func TestPickScaleDownCandidate(t *testing.T) {
 	cfg := &config.Config{
 		MinNodes: 2,
 	}
-	r := &Reconciler{
-		cfg:   cfg,
-		state: nodeops.NewNodeStateTracker(),
+	r := &controller.Reconciler{
+		Cfg:   cfg,
+		State: nodeops.NewNodeStateTracker(),
 	}
 
 	nodes := []v1.Node{
@@ -102,13 +115,17 @@ func TestPickScaleDownCandidate(t *testing.T) {
 		makeNode("node3", nil),
 	}
 
-	candidate := r.pickScaleDownCandidate(nodes)
+	candidate := r.PickScaleDownCandidate(
+		nodeops.WrapNodes(nodes, r.State, time.Now(), nodeops.NodeAnnotationConfig{}, r.Cfg.IgnoreLabels),
+	)
 	if candidate == nil || candidate.Name != "node3" {
 		t.Errorf("expected node3 as candidate, got %v", candidate)
 	}
 
 	nodes = nodes[:2]
-	candidate = r.pickScaleDownCandidate(nodes)
+	candidate = r.PickScaleDownCandidate(
+		nodeops.WrapNodes(nodes, r.State, time.Now(), nodeops.NodeAnnotationConfig{}, r.Cfg.IgnoreLabels),
+	)
 	if candidate != nil {
 		t.Errorf("expected nil candidate when at or below MinNodes, got %v", candidate)
 	}
@@ -119,7 +136,7 @@ func TestCooldownExclusion(t *testing.T) {
 		Cooldown: 5 * time.Minute,
 	}
 	state := nodeops.NewNodeStateTracker()
-	r := &Reconciler{cfg: cfg, state: state}
+	r := &controller.Reconciler{Cfg: cfg, State: state}
 
 	node := makeNode("node1", nil)
 	// Simulate recent shutdown 1 minute ago
@@ -127,10 +144,10 @@ func TestCooldownExclusion(t *testing.T) {
 	state.SetShutdownTime("node1", time.Now().Add(-1*time.Minute))
 
 	nodes := []v1.Node{node}
-	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
-		Cooldown:     r.cfg.Cooldown,
-		BootCooldown: r.cfg.BootCooldown,
-		IgnoreLabels: r.cfg.IgnoreLabels,
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.Cfg.Cooldown,
+		BootCooldown: r.Cfg.BootCooldown,
+		IgnoreLabels: r.Cfg.IgnoreLabels,
 	})
 	if len(eligible) != 0 {
 		t.Errorf("expected 0 eligible nodes due to cooldown, got %d", len(eligible))
@@ -138,20 +155,72 @@ func TestCooldownExclusion(t *testing.T) {
 }
 
 func TestPoweredOffNodeIsExcluded(t *testing.T) {
-	r := &Reconciler{
-		cfg:   &config.Config{},
-		state: nodeops.NewNodeStateTracker(),
+	r := &controller.Reconciler{
+		Cfg:   &config.Config{},
+		State: nodeops.NewNodeStateTracker(),
 	}
 	node := makeNode("node2", nil)
-	r.state.MarkPoweredOff("node2")
+	r.State.MarkPoweredOff("node2")
 
 	nodes := []v1.Node{node}
-	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.state, time.Now(), nodeops.EligibilityConfig{
-		Cooldown:     r.cfg.Cooldown,
-		BootCooldown: r.cfg.BootCooldown,
-		IgnoreLabels: r.cfg.IgnoreLabels,
+	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
+		Cooldown:     r.Cfg.Cooldown,
+		BootCooldown: r.Cfg.BootCooldown,
+		IgnoreLabels: r.Cfg.IgnoreLabels,
 	})
 	if len(eligible) != 0 {
 		t.Errorf("expected 0 eligible nodes due to powered-off status, got %d", len(eligible))
+	}
+}
+
+type mockMetrics struct{}
+
+func (m *mockMetrics) RecordEligibleNodes(_ int) {}
+func (m *mockMetrics) RecordChosenNode(_ string) {}
+
+type mockShutdowner struct{}
+
+func (m *mockShutdowner) Shutdown(_ context.Context, _ string) error { return nil }
+
+func TestMaybeScaleDown_DryRun(t *testing.T) {
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+		},
+	})
+	state := nodeops.NewNodeStateTracker()
+
+	n := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	wrapped := nodeops.NewNodeWrapper(n, state, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+
+	r := &controller.Reconciler{
+		Client:            client,
+		Cfg:               &config.Config{DryRun: true},
+		State:             state,
+		Metrics:           &mockMetrics{},
+		Shutdowner:        &mockShutdowner{},
+		ScaleDownStrategy: &mockScaleDownStrategy{},
+	}
+
+	result := r.MaybeScaleDown(context.Background(), []*nodeops.NodeWrapper{wrapped})
+	if !result {
+		t.Error("Expected dry-run scale down to return true")
+	}
+}
+
+func TestUncordonNode_DryRun(t *testing.T) {
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+		Spec:       v1.NodeSpec{Unschedulable: true},
+	})
+
+	r := &controller.Reconciler{
+		Client: client,
+		Cfg:    &config.Config{DryRun: true},
+	}
+
+	err := r.UncordonNode(context.Background(), "node1")
+	if err != nil {
+		t.Errorf("Expected no error during dry-run uncordon, got: %v", err)
 	}
 }
