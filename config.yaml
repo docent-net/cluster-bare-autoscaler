@@ -32,6 +32,7 @@ nodeLabels:
 
 nodeAnnotations:
   mac: "cba.dev/mac-address"       # Annotation to store auto-discovered MAC address for WOL
+  # cba.dev/was-powered-off - hardcoded, not configurable
 
 ignoreLabels:
   node-role.kubernetes.io/control-plane: ""   # Nodes with this label will be excluded from scaling decisions

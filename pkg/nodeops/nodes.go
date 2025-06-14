@@ -47,13 +47,19 @@ func ListManagedNodes(ctx context.Context, client kubernetes.Interface, filter M
 outer:
 	for _, node := range allNodes.Items {
 		if node.Labels[filter.ManagedLabel] != "true" {
+			slog.Debug("Skipping node due to lack or incorrect ManagedLabel", "node", node.Name)
 			continue
 		}
 		if node.Labels[filter.DisabledLabel] == "true" {
+			slog.Debug("Skipping node due to DisabledLabel set", "node", node.Name)
 			continue
 		}
-		for k, v := range filter.IgnoreLabels {
-			if node.Labels[k] == v {
+		for k := range filter.IgnoreLabels {
+			if _, exists := node.Labels[k]; exists {
+				slog.Debug("Skipping node due to IgnoreLabels match (label key exists)",
+					"node", node.Name,
+					"label", k,
+				)
 				continue outer
 			}
 		}

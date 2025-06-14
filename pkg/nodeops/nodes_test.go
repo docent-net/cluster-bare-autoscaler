@@ -13,33 +13,136 @@ import (
 )
 
 func TestListManagedNodes(t *testing.T) {
-	client := corefake.NewSimpleClientset(&v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node-a",
-			Labels: map[string]string{
-				"cba.dev/is-managed": "true",
-			},
-		},
-	}, &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "node-b",
-			Labels: map[string]string{
-				"cba.dev/is-managed": "false",
-			},
-		},
-	})
-
-	nodes, err := nodeops.ListManagedNodes(context.Background(), client, nodeops.ManagedNodeFilter{
+	ctx := context.Background()
+	filter := nodeops.ManagedNodeFilter{
 		ManagedLabel:  "cba.dev/is-managed",
 		DisabledLabel: "cba.dev/disabled",
-		IgnoreLabels:  map[string]string{},
+		IgnoreLabels: map[string]string{
+			"node-role.kubernetes.io/control-plane": "",
+			"node-home-assistant":                   "yes",
+		},
+	}
+
+	t.Run("returns only eligible nodes", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Labels: map[string]string{
+						"cba.dev/is-managed": "true",
+					},
+				},
+			},
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+					Labels: map[string]string{
+						"cba.dev/is-managed": "true",
+						"cba.dev/disabled":   "true",
+					},
+				},
+			},
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node3",
+					Labels: map[string]string{
+						"cba.dev/is-managed":                    "true",
+						"node-role.kubernetes.io/control-plane": "",
+					},
+				},
+			},
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node4",
+					Labels: map[string]string{
+						"cba.dev/is-managed":  "true",
+						"node-home-assistant": "yes",
+					},
+				},
+			},
+		)
+
+		nodes, err := nodeops.ListManagedNodes(ctx, client, filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(nodes) != 1 || nodes[0].Name != "node1" {
+			t.Errorf("expected only node1, got: %+v", nodes)
+		}
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(nodes) != 1 || nodes[0].Name != "node-a" {
-		t.Errorf("expected node-a, got: %+v", nodes)
-	}
+
+	t.Run("skips if ManagedLabel missing", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-x",
+				Labels: map[string]string{},
+			},
+		})
+		nodes, _ := nodeops.ListManagedNodes(ctx, client, filter)
+		if len(nodes) != 0 {
+			t.Errorf("expected no nodes, got: %+v", nodes)
+		}
+	})
+
+	t.Run("skips if ManagedLabel is not 'true'", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-y",
+				Labels: map[string]string{"cba.dev/is-managed": "false"},
+			},
+		})
+		nodes, _ := nodeops.ListManagedNodes(ctx, client, filter)
+		if len(nodes) != 0 {
+			t.Errorf("expected no nodes, got: %+v", nodes)
+		}
+	})
+
+	t.Run("skips if DisabledLabel is true", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-disabled",
+				Labels: map[string]string{
+					"cba.dev/is-managed": "true",
+					"cba.dev/disabled":   "true",
+				},
+			},
+		})
+		nodes, _ := nodeops.ListManagedNodes(ctx, client, filter)
+		if len(nodes) != 0 {
+			t.Errorf("expected no nodes, got: %+v", nodes)
+		}
+	})
+
+	t.Run("skips if IgnoreLabels key exists", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cp-node",
+				Labels: map[string]string{
+					"cba.dev/is-managed":                    "true",
+					"node-role.kubernetes.io/control-plane": "",
+				},
+			},
+		})
+		nodes, _ := nodeops.ListManagedNodes(ctx, client, filter)
+		if len(nodes) != 0 {
+			t.Errorf("expected no nodes, got: %+v", nodes)
+		}
+	})
+
+	t.Run("accepts good node", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "worker-node",
+				Labels: map[string]string{
+					"cba.dev/is-managed": "true",
+				},
+			},
+		})
+		nodes, _ := nodeops.ListManagedNodes(ctx, client, filter)
+		if len(nodes) != 1 || nodes[0].Name != "worker-node" {
+			t.Errorf("expected worker-node, got: %+v", nodes)
+		}
+	})
 }
 
 func TestListActiveNodes(t *testing.T) {
