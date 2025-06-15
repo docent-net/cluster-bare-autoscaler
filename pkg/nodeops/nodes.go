@@ -190,6 +190,10 @@ func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Inter
 	}
 
 	for _, node := range nodes {
+		if !IsNodeReady(&node) {
+			slog.Debug("Skipping node because it is not Ready", "node", node.Name)
+			continue
+		}
 		if _, hasAnnotation := node.Annotations[AnnotationPoweredOff]; !hasAnnotation {
 			continue
 		}
@@ -230,4 +234,14 @@ func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Inter
 	}
 
 	return nil
+}
+
+// IsNodeReady returns true if the node has a Ready condition with status True.
+func IsNodeReady(node *v1.Node) bool {
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == v1.NodeReady && cond.Status == v1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
