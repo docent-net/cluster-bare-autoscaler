@@ -2,6 +2,7 @@ package nodeops_test
 
 import (
 	"context"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	"testing"
 	"time"
 
@@ -292,4 +293,111 @@ func TestWrapNodes(t *testing.T) {
 	if !wrapped[1].HasDiscoveredMACAddr() {
 		t.Errorf("expected node-b to have discovered MAC address")
 	}
+}
+
+func TestRecoverUnexpectedlyBootedNodes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("recovers a node with annotation and unschedulable", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+				Labels: map[string]string{
+					"cba.dev/is-managed": "true",
+				},
+				Annotations: map[string]string{
+					nodeops.AnnotationPoweredOff: "true",
+				},
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: true,
+			},
+		})
+
+		cfg := &config.Config{
+			NodeLabels: config.NodeLabelConfig{
+				Managed:  "cba.dev/is-managed",
+				Disabled: "cba.dev/disabled",
+			},
+			IgnoreLabels: map[string]string{},
+		}
+
+		err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, client, cfg, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
+		if updated.Spec.Unschedulable {
+			t.Errorf("expected node to be uncordoned")
+		}
+		if _, ok := updated.Annotations[nodeops.AnnotationPoweredOff]; ok {
+			t.Errorf("expected powered-off annotation to be removed")
+		}
+	})
+
+	t.Run("dry-run skips actual changes", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node2",
+				Labels: map[string]string{
+					"cba.dev/is-managed": "true",
+				},
+				Annotations: map[string]string{
+					nodeops.AnnotationPoweredOff: "true",
+				},
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: true,
+			},
+		})
+
+		cfg := &config.Config{
+			NodeLabels: config.NodeLabelConfig{
+				Managed:  "cba.dev/is-managed",
+				Disabled: "cba.dev/disabled",
+			},
+			IgnoreLabels: map[string]string{},
+		}
+
+		err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, client, cfg, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := client.CoreV1().Nodes().Get(ctx, "node2", metav1.GetOptions{})
+		if !updated.Spec.Unschedulable {
+			t.Errorf("expected node to remain cordoned in dry-run")
+		}
+		if _, ok := updated.Annotations[nodeops.AnnotationPoweredOff]; !ok {
+			t.Errorf("expected annotation to remain in dry-run")
+		}
+	})
+
+	t.Run("skips node without annotation", func(t *testing.T) {
+		client := corefake.NewSimpleClientset(&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node3",
+				Labels: map[string]string{
+					"cba.dev/is-managed": "true",
+				},
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: true,
+			},
+		})
+
+		cfg := &config.Config{
+			NodeLabels: config.NodeLabelConfig{
+				Managed:  "cba.dev/is-managed",
+				Disabled: "cba.dev/disabled",
+			},
+			IgnoreLabels: map[string]string{},
+		}
+
+		err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, client, cfg, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }

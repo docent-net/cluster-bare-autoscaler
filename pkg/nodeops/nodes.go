@@ -2,6 +2,9 @@ package nodeops
 
 import (
 	"context"
+	"fmt"
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
+	"k8s.io/apimachinery/pkg/types"
 	"log/slog"
 	"math/rand"
 	"time"
@@ -165,4 +168,66 @@ func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now t
 	})
 
 	return eligible
+}
+
+func ShouldIgnoreNodeDueToLabels(node v1.Node, labels map[string]string) bool {
+	for k, v := range labels {
+		if val, ok := node.Labels[k]; ok && val == v {
+			return true
+		}
+	}
+	return false
+}
+
+func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Interface, cfg *config.Config, dryRun bool) error {
+	nodes, err := ListManagedNodes(ctx, client, ManagedNodeFilter{
+		ManagedLabel:  cfg.NodeLabels.Managed,
+		DisabledLabel: cfg.NodeLabels.Disabled,
+		IgnoreLabels:  cfg.IgnoreLabels,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list nodes for recovery: %w", err)
+	}
+
+	for _, node := range nodes {
+		if _, hasAnnotation := node.Annotations[AnnotationPoweredOff]; !hasAnnotation {
+			continue
+		}
+		if ShouldIgnoreNodeDueToLabels(node, cfg.IgnoreLabels) {
+			continue
+		}
+		if !node.Spec.Unschedulable {
+			slog.Debug("Skipping node that is not cordoned", "node", node.Name)
+			continue
+		}
+
+		slog.Info("Recovering unexpectedly booted node", "node", node.Name)
+
+		if dryRun {
+			slog.Debug("Dry-run: would uncordon and clear annotation", "node", node.Name)
+			continue
+		}
+
+		// Step 1: Uncordon
+		nodeCopy := node.DeepCopy()
+		nodeCopy.Spec.Unschedulable = false
+
+		_, err := client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+		if err != nil {
+			slog.Warn("Failed to uncordon node", "node", node.Name, "err", err)
+			continue
+		}
+
+		// Step 2: Remove powered-off annotation
+		patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, AnnotationPoweredOff))
+		_, err = client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+		if err != nil {
+			slog.Warn("Failed to clear powered-off annotation", "node", node.Name, "err", err)
+			continue
+		}
+
+		slog.Info("Recovered node successfully", "node", node.Name)
+	}
+
+	return nil
 }

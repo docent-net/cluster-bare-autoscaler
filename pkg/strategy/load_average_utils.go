@@ -64,7 +64,7 @@ func (u *ClusterLoadUtils) GetEligibleClusterLoads(ctx context.Context, ignore m
 			continue
 		}
 
-		if n.Name != exclude && !ShouldIgnoreNodeDueToLabels(n, ignore) {
+		if n.Name != exclude && !nodeops.ShouldIgnoreNodeDueToLabels(n, ignore) {
 			names = append(names, n.Name)
 		}
 	}
@@ -142,15 +142,6 @@ func (u *ClusterLoadUtils) findMetricsPodForNode(ctx context.Context, nodeName s
 		}
 	}
 	return nil, fmt.Errorf("no metrics pod for node %s", nodeName)
-}
-
-func ShouldIgnoreNodeDueToLabels(node v1.Node, labels map[string]string) bool {
-	for k, v := range labels {
-		if val, ok := node.Labels[k]; ok && val == v {
-			return true
-		}
-	}
-	return false
 }
 
 func EvaluateAggregate(loads []float64, mode ClusterLoadEvalMode) float64 {

@@ -154,6 +154,11 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	now := time.Now()
+
+	if err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, r.Client, r.Cfg, r.Cfg.DryRun); err != nil {
+		slog.Warn("Failed to recover unexpectedly booted nodes", "err", err)
+	}
+
 	if r.State.IsGlobalCooldownActive(now, r.Cfg.Cooldown) {
 		remaining := r.Cfg.Cooldown - now.Sub(r.State.LastShutdownTime)
 		slog.Info("Global cooldown active — skipping reconcile loop", "remaining", remaining.Round(time.Second).String())

@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: docent/cluster-bare-autoscaler
-  tag: "0.1.2-dirty"
+  tag: "0.7.5-dirty"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -32,7 +32,7 @@ metricsDaemonset:
   enabled: true
   image:
     repository: docent/loadavg-exporter
-    tag: v0.1.0
+    tag: "0.7.5-dirty"
     pullPolicy: IfNotPresent
   port: 9100
   imagePullSecrets: []
@@ -52,7 +52,7 @@ shutdownDaemonset:
   port: 9101
   image:
     repository: docent/poweroff-manager
-    tag: v0.1.0
+    tag: "0.7.5-dirty"
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
@@ -72,7 +72,7 @@ wolAgent:
   port: 9102
   image:
     repository:  docent/wol-agent
-    tag: 0.1.0
+    tag: "0.7.5-dirty"
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
