@@ -3,7 +3,6 @@ package power
 import (
 	"context"
 	"fmt"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"io"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,34 +16,15 @@ import (
 type WakeOnLanController struct {
 	DryRun         bool
 	Client         kubernetes.Interface
-	NodeFilter     nodeops.ManagedNodeFilter
 	Namespace      string
 	PodLabel       string
 	Port           int
 	BootTimeoutSec time.Duration
 	BroadcastAddr  string
 	MaxRetries     int
-	MACKey         nodeops.NodeAnnotationConfig
 }
 
-func (w *WakeOnLanController) PowerOn(ctx context.Context, node string) error {
-	var mac string
-	nodes, err := nodeops.ListManagedNodes(ctx, w.Client, w.NodeFilter)
-	if err != nil {
-		slog.Warn("Failed to list managed nodes", "err", err)
-		return nil
-	}
-
-	for _, n := range nodes {
-		if n.Name == node {
-			mac = nodeops.GetMACAddressFromNode(n, w.MACKey)
-			break
-		}
-	}
-	if mac == "" {
-		return fmt.Errorf("missing WOL MAC address for node %q", node)
-	}
-
+func (w *WakeOnLanController) PowerOn(ctx context.Context, node string, mac string) error {
 	if w.DryRun {
 		slog.Debug("Dry-run: would send WOL request to remote agent", "node", node, "mac", mac, "bcast", w.BroadcastAddr)
 		return nil

@@ -157,6 +157,17 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	if err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, r.Client, r.Cfg, r.Cfg.DryRun); err != nil {
 		slog.Warn("Failed to recover unexpectedly booted nodes", "err", err)
+		return nil
+	}
+
+	if r.Cfg.ForcePowerOnAllNodes {
+		slog.Info("Force power-on of all managed nodes enabled")
+		err := nodeops.ForcePowerOnAllNodes(ctx, r.Client, r.Cfg, r.State, r.PowerOner, r.Cfg.DryRun)
+		if err != nil {
+			slog.Warn("Failed to force power on all nodes", "err", err)
+		}
+
+		return nil
 	}
 
 	if r.State.IsGlobalCooldownActive(now, r.Cfg.Cooldown) {
@@ -272,59 +283,28 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 	}
 
 	slog.Info("Attempting scale-up", "node", nodeName)
-	err = r.PowerOner.PowerOn(ctx, nodeName)
+
+	node, err := r.Client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
-		slog.Error("PowerOn failed", "node", nodeName, "err", err)
+		slog.Error("Failed to get node object for scale-up", "node", nodeName, "err", err)
 		return false
 	}
 
-	slog.Info("Scale-up triggered", "node", nodeName)
+	wrapped := nodeops.NewNodeWrapper(node, r.State, time.Now(), nodeops.NodeAnnotationConfig{
+		MAC: r.Cfg.NodeAnnotations.MAC,
+	}, r.Cfg.IgnoreLabels)
+
+	if err := nodeops.PowerOnAndMarkBooted(ctx, wrapped, r.Cfg, r.Client, r.Shutdowner, r.PowerOner, r.State, r.Cfg.DryRun); err != nil {
+		slog.Error("PowerOnAndMarkBooted failed", "node", nodeName, "err", err)
+		return false
+	}
+
+	// Manual: Clear shutdown state and metrics here
 	r.State.ClearPoweredOff(nodeName)
 	metrics.PoweredOffNodes.WithLabelValues(nodeName).Set(0)
 
-	// Uncordon node
-	if err := r.UncordonNode(ctx, nodeName); err != nil {
-		slog.Warn("Failed to uncordon node after power-on", "node", nodeName, "err", err)
-		return false
-	}
-
-	// Clear powered-off annotation
-	if err := r.clearPoweredOffAnnotation(ctx, nodeName); err != nil {
-		slog.Warn("Failed to clear powered-off annotation", "node", nodeName, "err", err)
-	}
-
-	r.State.MarkGlobalShutdown()
-	r.State.MarkBooted(nodeName)
-
-	return true // scale-up action performed
-}
-
-func (r *Reconciler) UncordonNode(ctx context.Context, nodeName string) error {
-	node, err := r.Client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get node for uncordon: %w", err)
-	}
-
-	if !node.Spec.Unschedulable {
-		slog.Debug("Node is already schedulable", "node", nodeName)
-		return nil
-	}
-
-	updated := node.DeepCopy()
-	updated.Spec.Unschedulable = false
-
-	if r.Cfg.DryRun {
-		slog.Debug("Dry-run: would uncordon node", "node", nodeName)
-		return nil
-	}
-
-	_, err = r.Client.CoreV1().Nodes().Update(ctx, updated, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to uncordon node: %w", err)
-	}
-
-	slog.Info("Node uncordoned successfully", "node", nodeName)
-	return nil
+	slog.Info("Scale-up complete", "node", nodeName)
+	return true
 }
 
 func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.NodeWrapper) bool {
@@ -350,7 +330,7 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 
 	if err := r.cordonAndDrain(ctx, candidate); err != nil {
 		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
-		if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, candidate.Name); err != nil {
 			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
 		}
 		return false
@@ -363,7 +343,7 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 	metrics.ShutdownAttempts.Inc()
 	if err := r.Shutdowner.Shutdown(ctx, candidate.Name); err != nil {
 		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
-		if err := r.clearPoweredOffAnnotation(ctx, candidate.Name); err != nil {
+		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, candidate.Name); err != nil {
 			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
 		}
 	} else {
@@ -390,17 +370,6 @@ func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, node *nodeops.N
 	timestamp := metav1.Now().UTC().Format("2006-01-02T15:04:05Z")
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp))
 	_, err := r.Client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return err
-}
-
-func (r *Reconciler) clearPoweredOffAnnotation(ctx context.Context, nodeName string) error {
-	if r.Cfg.DryRun {
-		slog.Debug("Dry-run: would clear powered-off annotation", "node", nodeName)
-		return nil
-	}
-	slog.Debug("Clearing powered-off annotation", "node", nodeName)
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, nodeops.AnnotationPoweredOff))
-	_, err := r.Client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 

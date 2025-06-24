@@ -43,6 +43,10 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
   - Respects `.Disabled` flag in `config.yaml`  
 - ✅ Safe cordon and drain using Kubernetes eviction API  
 - ✅ Wake-on-LAN support for powering on bare-metal machines  
+- ✅ Force power-on mode for maintenance
+  - `forcePowerOnAllNodes: true` forces all previously powered-off nodes to be booted
+  - Automatically clears `was-powered-off` annotation and uncordons nodes
+
 
 ## Additional, optional services
 

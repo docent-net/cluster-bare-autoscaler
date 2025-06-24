@@ -3,7 +3,6 @@ package power
 import (
 	"context"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"k8s.io/client-go/kubernetes"
 	"log/slog"
 	"time"
@@ -20,7 +19,7 @@ const (
 )
 
 type PowerOnController interface {
-	PowerOn(ctx context.Context, nodeName string) error
+	PowerOn(ctx context.Context, nodeName string, mac string) error
 }
 
 type ShutdownController interface {
@@ -51,15 +50,7 @@ func NewControllersFromConfig(cfg *config.Config, client kubernetes.Interface) (
 		powerOner = &NoopPowerOnController{}
 	case PowerOnModeWOL:
 		powerOner = &WakeOnLanController{
-			DryRun: cfg.DryRun,
-			NodeFilter: nodeops.ManagedNodeFilter{
-				ManagedLabel:  cfg.NodeLabels.Managed,
-				DisabledLabel: cfg.NodeLabels.Disabled,
-				IgnoreLabels:  cfg.IgnoreLabels,
-			},
-			MACKey: nodeops.NodeAnnotationConfig{
-				MAC: cfg.NodeAnnotations.MAC,
-			},
+			DryRun:         cfg.DryRun,
 			BroadcastAddr:  cfg.WOLBroadcastAddr,
 			BootTimeoutSec: time.Duration(cfg.WOLBootTimeoutSec) * time.Second,
 			Client:         client,

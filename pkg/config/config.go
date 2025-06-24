@@ -50,6 +50,8 @@ type Config struct {
 	WOLBootTimeoutSec    int            `yaml:"wolBootTimeoutSeconds"`
 	WolAgent             WolAgentConfig `yaml:"wolAgent"`
 	MACDiscoveryInterval time.Duration  `yaml:"macDiscoveryIntervalMin"`
+
+	ForcePowerOnAllNodes bool `yaml:"forcePowerOnAllNodes"`
 }
 
 type LoadAverageStrategyConfig struct {

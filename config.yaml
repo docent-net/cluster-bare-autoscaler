@@ -16,6 +16,12 @@ bootCooldown: 360m                 # Per-node boot cooldown: delay before shutti
 pollInterval: 60s                  # Interval between reconcile loops
 
 # ──────────────────────────────────────────────
+# Maintenance operations
+# ──────────────────────────────────────────────
+
+forcePowerOnAllNodes: false       # If set to true, CBA will power on all nodes regardless of current load.
+
+# ──────────────────────────────────────────────
 # Resource Buffer Settings
 # ──────────────────────────────────────────────
 

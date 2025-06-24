@@ -7,7 +7,7 @@ import (
 
 type NoopPowerOnController struct{}
 
-func (n *NoopPowerOnController) PowerOn(ctx context.Context, node string) error {
+func (n *NoopPowerOnController) PowerOn(ctx context.Context, node string, mac string) error {
 	slog.Info("PowerOn skipped — mode=disabled", "node", node)
 	return nil
 }

@@ -50,7 +50,7 @@ func TestNoopControllers(t *testing.T) {
 	ctx := context.Background()
 
 	p := &power.NoopPowerOnController{}
-	if err := p.PowerOn(ctx, "node1"); err != nil {
+	if err := p.PowerOn(ctx, "node1", "00:00:00:00:00:00"); err != nil {
 		t.Errorf("NoopPowerOnController should not fail, got: %v", err)
 	}
 

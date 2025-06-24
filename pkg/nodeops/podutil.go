@@ -11,10 +11,12 @@ import (
 
 // FindPodIPOnNode locates a Pod by label running on the specified node and returns its IP.
 func FindPodIPOnNode(ctx context.Context, client kubernetes.Interface, namespace, label, nodeName string) (string, error) {
+	selector, err := labels.Parse(label)
+	if err != nil {
+		return "", err
+	}
 	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.Set(map[string]string{
-			"app": label,
-		}).String(),
+		LabelSelector: selector.String(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("listing pods: %w", err)
