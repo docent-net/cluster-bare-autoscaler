@@ -328,8 +328,8 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
 	metrics.ScaleDowns.Inc()
 
-	if err := r.cordonAndDrain(ctx, candidate); err != nil {
-		slog.Warn("cordonAndDrain failed", "node", candidate.Name, "err", err)
+	if err := r.CordonAndDrain(ctx, candidate); err != nil {
+		slog.Warn("CordonAndDrain failed", "node", candidate.Name, "err", err)
 		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, candidate.Name); err != nil {
 			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
 		}
@@ -380,7 +380,7 @@ func (r *Reconciler) PickScaleDownCandidate(eligible []*nodeops.NodeWrapper) *no
 	return eligible[len(eligible)-1]
 }
 
-func (r *Reconciler) cordonAndDrain(ctx context.Context, node *nodeops.NodeWrapper) error {
+func (r *Reconciler) CordonAndDrain(ctx context.Context, node *nodeops.NodeWrapper) error {
 	// Step 1: Cordon
 	latest, err := r.Client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 	if err != nil {

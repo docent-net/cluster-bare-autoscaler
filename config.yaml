@@ -65,7 +65,7 @@ loadAverageStrategy:
 shutdownManager:
   port: 9101                       # Port used by the poweroff daemon to expose `/shutdown`
   namespace: cluster-bare-autoscaler
-  podLabel: cluster-bare-autoscaler-poweroff-manager
+  podLabel: "app=cluster-bare-autoscaler-poweroff-manager"
 
 shutdownMode: "http"               # One of: disabled, http
 

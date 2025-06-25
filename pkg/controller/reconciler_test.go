@@ -2,6 +2,9 @@ package controller_test
 
 import (
 	"context"
+	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 	"testing"
 	"time"
 
@@ -79,11 +82,123 @@ func TestMaybeScaleDown_StrategyDenies(t *testing.T) {
 }
 
 func TestCordonAndDrain_EvictionFails(t *testing.T) {
-	t.Skip("TODO: implement TestCordonAndDrain_EvictionFails logic")
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset(
+		&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: false,
+			},
+		},
+		&v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mypod",
+				Namespace: "default",
+			},
+			Spec: v1.PodSpec{
+				NodeName: "node1",
+			},
+		},
+	)
+
+	// Simulate eviction failure
+	client.Fake.PrependReactor("create", "pods/eviction", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("eviction failed")
+	})
+
+	r := &controller.Reconciler{
+		Client: client,
+		Cfg:    &config.Config{},
+	}
+
+	now := time.Now()
+	state := nodeops.NewNodeStateTracker()
+	wrapped := nodeops.NewNodeWrapper(
+		&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: false,
+			},
+		},
+		state,
+		now,
+		nodeops.NodeAnnotationConfig{},
+		map[string]string{},
+	)
+
+	err := r.CordonAndDrain(ctx, wrapped)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "aborting drain due to eviction failure")
 }
 
 func TestCordonAndDrain_SkipsMirrorAndDaemonSet(t *testing.T) {
-	t.Skip("TODO: implement DaemonSet/mirror pod skip logic")
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset(
+		&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: false,
+			},
+		},
+		&v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mirror-pod",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"kubernetes.io/config.mirror": "abc123",
+				},
+			},
+			Spec: v1.PodSpec{
+				NodeName: "node1",
+			},
+		},
+		&v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ds-pod",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "DaemonSet",
+					Name: "ds-owner",
+				}},
+			},
+			Spec: v1.PodSpec{
+				NodeName: "node1",
+			},
+		},
+	)
+
+	r := &controller.Reconciler{
+		Client: client,
+		Cfg:    &config.Config{},
+	}
+
+	now := time.Now()
+	state := nodeops.NewNodeStateTracker()
+	wrapped := nodeops.NewNodeWrapper(
+		&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+			Spec: v1.NodeSpec{
+				Unschedulable: false,
+			},
+		},
+		state,
+		now,
+		nodeops.NodeAnnotationConfig{},
+		map[string]string{},
+	)
+
+	err := r.CordonAndDrain(ctx, wrapped)
+	require.NoError(t, err, "expected no error when draining node with mirror and DaemonSet pods")
 }
 
 func TestMaybeScaleUp_Success(t *testing.T) {

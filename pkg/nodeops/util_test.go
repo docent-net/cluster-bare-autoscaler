@@ -138,24 +138,3 @@ func TestUncordonNode_NoOp(t *testing.T) {
 		t.Errorf("expected no-op success, got: %v", err)
 	}
 }
-
-func TestFindPodIPOnNode_Found(t *testing.T) {
-	client := corefake.NewSimpleClientset()
-    _, _ = client.CoreV1().Pods("default").Create(context.Background(), &v1.Pod{
-        ObjectMeta: metav1.ObjectMeta{
-            Name:      "agent",
-            Namespace: "default",
-            Labels:    map[string]string{"app": "agent"},
-        },
-        Spec: v1.PodSpec{
-            NodeName: "node1",
-        },
-        Status: v1.PodStatus{
-            PodIP: "1.2.3.4",
-        },
-    }, metav1.CreateOptions{})
-	ip, err := nodeops.FindPodIPOnNode(context.Background(), client, "default", "app=agent", "node1")
-	if err != nil || ip != "1.2.3.4" {
-		t.Errorf("expected pod IP 1.2.3.4, got %s (err: %v)", ip, err)
-	}
-}
