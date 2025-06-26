@@ -35,10 +35,13 @@ func (s *ShutdownHTTPController) Shutdown(ctx context.Context, node string) erro
 }
 
 func (s *ShutdownHTTPController) FindShutdownPodIP(ctx context.Context, node string) (string, error) {
+	selector, err := labels.Parse(s.PodLabel)
+	if err != nil {
+		return "", fmt.Errorf("invalid label selector: %w", err)
+	}
+
 	pods, err := s.Client.CoreV1().Pods(s.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.Set(map[string]string{
-			"app": s.PodLabel,
-		}).String(),
+		LabelSelector: selector.String(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("listing pods: %w", err)

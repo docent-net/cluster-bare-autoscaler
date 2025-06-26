@@ -35,9 +35,9 @@ func TestFindShutdownPodIP_Success(t *testing.T) {
 	})
 
 	ctrl := &power.ShutdownHTTPController{
-		Client:    client, // ✅ use the variable, not the type name
+		Client:    client,
 		Namespace: "default",
-		PodLabel:  "shutdown",
+		PodLabel:  "app=shutdown",
 		Port:      8080,
 	}
 
