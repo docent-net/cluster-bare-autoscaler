@@ -33,7 +33,7 @@ func shutdownHandler(w http.ResponseWriter, r *http.Request) {
 func findMainInterfaceAndMAC() (string, string, error) {
 	data, err := os.ReadFile("/proc/net/route")
 	if err != nil {
-		return "", "", fmt.Errorf("reading route table: %w", err)
+		return "", "", fmt.Println("reading route table: %w", err)
 	}
 
 	var mainIface string

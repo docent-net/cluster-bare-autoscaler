@@ -92,6 +92,9 @@ spec:
                 - NET_RAW
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
           resources:
             {{- toYaml .Values.wolAgent.resources | nindent 12 }}
       restartPolicy: Always

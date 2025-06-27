@@ -18,3 +18,4 @@
 - CLI enhancements: add usage examples, better validation
 - Improve config validation (e.g., thresholds > 0, cooldown sanity checks)
 - Detect pod eviction stuck conditions
+- Use retry.OnError to handle update conflicts across the codebase ([#20](https://github.com/docent-net/cluster-bare-autoscaler/issues/20))
