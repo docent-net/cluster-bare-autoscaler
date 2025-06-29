@@ -77,8 +77,14 @@ spec:
           resources:
             {{- toYaml .Values.shutdownDaemonset.resources | nindent 12 }}
           securityContext:
-            readOnlyRootFilesystem: true
+            capabilities:
+              add:
+                - NET_RAW
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1050
+            runAsGroup: 1050
+            runAsNonRoot: true
       volumes:
         - name: shutdown-socket
           hostPath:

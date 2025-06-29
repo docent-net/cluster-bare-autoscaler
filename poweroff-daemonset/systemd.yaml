@@ -15,6 +15,12 @@
   gather_facts: False
   become: true
   tasks:
+    - name: Ensure 'cba' group exists
+      group:
+        name: cba
+        gid: 1050
+        state: present
+        system: yes
     - name: Create systemd socket unit
       copy:
         dest: /etc/systemd/system/cba-shutdown.socket
@@ -29,7 +35,7 @@
           ListenStream=/run/cba-shutdown.sock
           SocketMode=0660
           SocketUser=root
-          SocketGroup=root
+          SocketGroup=cba
 
           [Install]
           WantedBy=sockets.target
