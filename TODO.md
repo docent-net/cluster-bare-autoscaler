@@ -1,7 +1,6 @@
 # TODO for Cluster Bare Autoscaler
 
 ## 🔧 In Progress / Next Up
-- Drop root in side-daemonsets/deployments where not required
 - Increase unit tests coverage
 
 ## 📌 Planned / Backlog

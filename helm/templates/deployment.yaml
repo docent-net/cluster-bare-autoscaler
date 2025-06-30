@@ -49,6 +49,11 @@ spec:
               path: /readyz
               port: http
           resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 65532
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
       volumes:
         - name: config
           configMap:

@@ -39,6 +39,8 @@ spec:
         {{- toYaml .Values.metricsDaemonset.tolerations | nindent 8 }}
       nodeSelector:
         {{- toYaml .Values.metricsDaemonset.nodeSelector | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.metricsDaemonset.affinity | nindent 8 }}
 {{- end }}
 ---
 {{- if .Values.shutdownDaemonset.enabled }}
