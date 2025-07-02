@@ -3,6 +3,8 @@ package nodeops
 import (
 	"context"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	"time"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
@@ -15,24 +17,26 @@ import (
 
 // UncordonNode sets the Unschedulable field of a node to false.
 func UncordonNode(ctx context.Context, client kubernetes.Interface, nodeName string) error {
-	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("fetch node: %w", err)
-	}
+	return retry.OnError(retry.DefaultBackoff, apierrors.IsConflict, func() error {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("fetch node: %w", err)
+		}
 
-	if !node.Spec.Unschedulable {
+		if !node.Spec.Unschedulable {
+			return nil
+		}
+
+		nodeCopy := node.DeepCopy()
+		nodeCopy.Spec.Unschedulable = false
+
+		_, err = client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("uncordon update: %w", err)
+		}
+
 		return nil
-	}
-
-	nodeCopy := node.DeepCopy()
-	nodeCopy.Spec.Unschedulable = false
-
-	_, err = client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("uncordon update: %w", err)
-	}
-
-	return nil
+	})
 }
 
 // ClearPoweredOffAnnotation removes the powered-off annotation from the node.
@@ -46,7 +50,7 @@ func ClearPoweredOffAnnotation(ctx context.Context, client kubernetes.Interface,
 }
 
 // PowerOnAndMarkBooted performs power-on logic and updates state and annotations.
-func PowerOnAndMarkBooted(ctx context.Context, node *NodeWrapper, cfg *config.Config, client kubernetes.Interface, shutdowner power.ShutdownController, powerOner power.PowerOnController, state *NodeStateTracker, dryRun bool) error {
+func PowerOnAndMarkBooted(ctx context.Context, node *NodeWrapper, cfg *config.Config, client kubernetes.Interface, powerOner power.PowerOnController, state *NodeStateTracker, dryRun bool) error {
 	slog.Info("Powering on node", "node", node.Name)
 
 	if dryRun {
@@ -112,7 +116,7 @@ func ForcePowerOnAllNodes(
 		}, cfg.IgnoreLabels)
 
 		slog.Info("Force powering on", "node", node.Name)
-		if err := PowerOnAndMarkBooted(ctx, wrapped, cfg, client, nil, powerOner, state, dryRun); err != nil {
+		if err := PowerOnAndMarkBooted(ctx, wrapped, cfg, client, powerOner, state, dryRun); err != nil {
 			slog.Warn("Failed to force power on node", "node", node.Name, "err", err)
 			continue
 		}

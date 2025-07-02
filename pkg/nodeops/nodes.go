@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"log/slog"
 	"math/rand"
 	"time"
@@ -162,7 +164,6 @@ func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now t
 		eligible = append(eligible, node)
 	}
 
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(eligible), func(i, j int) {
 		eligible[i], eligible[j] = eligible[j], eligible[i]
 	})
@@ -213,12 +214,23 @@ func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Inter
 		}
 
 		// Step 1: Uncordon
-		nodeCopy := node.DeepCopy()
-		nodeCopy.Spec.Unschedulable = false
+		err := retry.OnError(retry.DefaultBackoff, apierrors.IsConflict, func() error {
+			nodeLatest, err := client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("refetch node: %w", err)
+			}
 
-		_, err := client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+			nodeCopy := nodeLatest.DeepCopy()
+			nodeCopy.Spec.Unschedulable = false
+
+			_, err = client.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+			if err != nil {
+				return fmt.Errorf("update node: %w", err)
+			}
+			return nil
+		})
 		if err != nil {
-			slog.Warn("Failed to uncordon node", "node", node.Name, "err", err)
+			slog.Warn("Failed to uncordon node after retries", "node", node.Name, "err", err)
 			continue
 		}
 

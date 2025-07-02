@@ -87,7 +87,7 @@ func TestPowerOnAndMarkBooted_HandlesPowerFailure(t *testing.T) {
 		MAC: "cba.dev/mac",
 	}
 
-	err := nodeops.PowerOnAndMarkBooted(context.Background(), nodeops.NewNodeWrapper(node, state, time.Now(), annotations, nil), cfg, corefake.NewSimpleClientset(node), nil, mockPower, state, false)
+	err := nodeops.PowerOnAndMarkBooted(context.Background(), nodeops.NewNodeWrapper(node, state, time.Now(), annotations, nil), cfg, corefake.NewSimpleClientset(node), mockPower, state, false)
 	if err == nil || !mockPower.called {
 		t.Errorf("expected failure and PowerOn call")
 	}

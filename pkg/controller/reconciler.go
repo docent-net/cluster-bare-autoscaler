@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
+	"k8s.io/client-go/util/retry"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	policyv1 "k8s.io/api/policy/v1"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -188,7 +190,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		return err
 	}
 
-	eligible := r.filterEligibleNodes(ctx, allNodes.Items)
+	eligible := r.filterEligibleNodes(allNodes.Items)
 	r.MaybeScaleDown(ctx, eligible)
 
 	return nil
@@ -224,7 +226,7 @@ func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
 	}
 }
 
-func (r *Reconciler) filterEligibleNodes(ctx context.Context, nodes []v1.Node) []*nodeops.NodeWrapper {
+func (r *Reconciler) filterEligibleNodes(nodes []v1.Node) []*nodeops.NodeWrapper {
 	eligible := nodeops.FilterShutdownEligibleNodes(nodes, r.State, time.Now(), nodeops.EligibilityConfig{
 		Cooldown:     r.Cfg.Cooldown,
 		BootCooldown: r.Cfg.BootCooldown,
@@ -294,7 +296,7 @@ func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
 		MAC: r.Cfg.NodeAnnotations.MAC,
 	}, r.Cfg.IgnoreLabels)
 
-	if err := nodeops.PowerOnAndMarkBooted(ctx, wrapped, r.Cfg, r.Client, r.Shutdowner, r.PowerOner, r.State, r.Cfg.DryRun); err != nil {
+	if err := nodeops.PowerOnAndMarkBooted(ctx, wrapped, r.Cfg, r.Client, r.PowerOner, r.State, r.Cfg.DryRun); err != nil {
 		slog.Error("PowerOnAndMarkBooted failed", "node", nodeName, "err", err)
 		return false
 	}
@@ -382,20 +384,21 @@ func (r *Reconciler) PickScaleDownCandidate(eligible []*nodeops.NodeWrapper) *no
 
 func (r *Reconciler) CordonAndDrain(ctx context.Context, node *nodeops.NodeWrapper) error {
 	// Step 1: Cordon
-	latest, err := r.Client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
-	if err != nil {
-		slog.Error("failed to refetch node before cordon", "node", node.Name, "err", err)
-		return err
-	}
-
-	latestCopy := latest.DeepCopy()
-	latestCopy.Spec.Unschedulable = true
-
 	if r.Cfg.DryRun {
 		slog.Info("Dry-run: would cordon node", "node", node.Name)
 	} else {
-		_, err = r.Client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
+		err := retry.OnError(retry.DefaultBackoff, apierrors.IsConflict, func() error {
+			latest, err := r.Client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			latestCopy := latest.DeepCopy()
+			latestCopy.Spec.Unschedulable = true
+			_, err = r.Client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
+			return err
+		})
 		if err != nil {
+			slog.Error("Failed to cordon node after retries", "node", node.Name, "err", err)
 			return err
 		}
 		slog.Info("Node cordoned", "node", node.Name)
