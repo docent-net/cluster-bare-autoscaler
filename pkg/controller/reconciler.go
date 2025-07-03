@@ -181,7 +181,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	slog.Info("Running reconcile loop")
 	metrics.Evaluations.Inc()
 
-	if r.maybeScaleUp(ctx) {
+	if r.MaybeScaleUp(ctx) {
 		return nil // stop here to avoid scaling up in the same loop
 	}
 
@@ -273,7 +273,7 @@ func (r *Reconciler) shutdownNodeNames(ctx context.Context) []string {
 	return nodes
 }
 
-func (r *Reconciler) maybeScaleUp(ctx context.Context) bool {
+func (r *Reconciler) MaybeScaleUp(ctx context.Context) bool {
 	nodeName, shouldScale, err := r.ScaleUpStrategy.ShouldScaleUp(ctx)
 	if err != nil {
 		slog.Error("Scale-up strategy error", "err", err)

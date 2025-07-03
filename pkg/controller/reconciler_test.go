@@ -205,8 +205,30 @@ func TestMaybeScaleUp_Success(t *testing.T) {
 	t.Skip("TODO: implement successful scale-up with node power-on")
 }
 
+type failingScaleUpStrategy struct{}
+
+func (f *failingScaleUpStrategy) ShouldScaleUp(_ context.Context) (string, bool, error) {
+	return "", false, fmt.Errorf("simulated strategy error")
+}
+
+func (f *failingScaleUpStrategy) Name() string {
+	return "failing-mock"
+}
+
 func TestMaybeScaleUp_StrategyError(t *testing.T) {
-	t.Skip("TODO: strategy error should be handled gracefully")
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset()
+
+	reconciler := &controller.Reconciler{
+		Client:          client,
+		Cfg:             &config.Config{},
+		State:           nodeops.NewNodeStateTracker(),
+		ScaleUpStrategy: &failingScaleUpStrategy{},
+	}
+
+	ok := reconciler.MaybeScaleUp(ctx)
+	require.False(t, ok, "MaybeScaleUp should return false on strategy error")
 }
 
 func TestAnnotatePoweredOffNode_DryRun(t *testing.T) {
