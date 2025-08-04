@@ -338,7 +338,7 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 		return false
 	}
 
-	if err := r.annotatePoweredOffNode(ctx, candidate); err != nil {
+	if err := r.AnnotatePoweredOffNode(ctx, candidate); err != nil {
 		slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
 	}
 
@@ -363,7 +363,7 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 	return true
 }
 
-func (r *Reconciler) annotatePoweredOffNode(ctx context.Context, node *nodeops.NodeWrapper) error {
+func (r *Reconciler) AnnotatePoweredOffNode(ctx context.Context, node *nodeops.NodeWrapper) error {
 	if r.Cfg.DryRun {
 		slog.Debug("Dry-run: would annotate node as powered-off", "node", node.Name)
 		return nil

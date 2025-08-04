@@ -232,11 +232,76 @@ func TestMaybeScaleUp_StrategyError(t *testing.T) {
 }
 
 func TestAnnotatePoweredOffNode_DryRun(t *testing.T) {
-	t.Skip("TODO: dry-run should skip powered-off annotation")
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+	})
+
+	state := nodeops.NewNodeStateTracker()
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+	}
+	wrapped := nodeops.NewNodeWrapper(node, state, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+
+	reconciler := &controller.Reconciler{
+		Client: client,
+		Cfg: &config.Config{
+			DryRun: true,
+		},
+		State: state,
+	}
+
+	err := reconciler.AnnotatePoweredOffNode(ctx, wrapped)
+	require.NoError(t, err, "AnnotatePoweredOffNode should return nil in dry-run mode")
 }
 
-func TestAnnotatePoweredOffNode_EmptyKey(t *testing.T) {
-	t.Skip("TODO: if annotation key is empty, should be no-op")
+func TestAnnotatePoweredOffNode_Success(t *testing.T) {
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+	})
+
+	state := nodeops.NewNodeStateTracker()
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+	}
+	wrapped := nodeops.NewNodeWrapper(node, state, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+
+	reconciler := &controller.Reconciler{
+		Client: client,
+		Cfg:    &config.Config{DryRun: false},
+		State:  state,
+	}
+
+	err := reconciler.AnnotatePoweredOffNode(ctx, wrapped)
+	require.NoError(t, err, "annotatePoweredOffNode should succeed")
+
+	// Verify annotation was applied
+	updated, err := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Contains(t, updated.Annotations, nodeops.AnnotationPoweredOff)
 }
 
 func TestReconcile_ForcePowerOnAllNodes(t *testing.T) {
