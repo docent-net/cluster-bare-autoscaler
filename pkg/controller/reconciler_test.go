@@ -201,10 +201,6 @@ func TestCordonAndDrain_SkipsMirrorAndDaemonSet(t *testing.T) {
 	require.NoError(t, err, "expected no error when draining node with mirror and DaemonSet pods")
 }
 
-func TestMaybeScaleUp_Success(t *testing.T) {
-	t.Skip("TODO: implement successful scale-up with node power-on")
-}
-
 type failingScaleUpStrategy struct{}
 
 func (f *failingScaleUpStrategy) ShouldScaleUp(_ context.Context) (string, bool, error) {
@@ -304,14 +300,324 @@ func TestAnnotatePoweredOffNode_Success(t *testing.T) {
 	require.Contains(t, updated.Annotations, nodeops.AnnotationPoweredOff)
 }
 
-func TestReconcile_ForcePowerOnAllNodes(t *testing.T) {
-	t.Skip("TODO: simulate full forced power-on path")
+type noopShutdownController struct{}
+
+func (n *noopShutdownController) SendShutdownRequest(ctx context.Context, addr string, nodeName string) error {
+	return nil
 }
 
-func TestReconcile_GlobalCooldownActive(t *testing.T) {
-	t.Skip("TODO: skip reconcile if global cooldown active")
+func (n *noopShutdownController) Shutdown(ctx context.Context, nodeName string) error {
+	return nil
+}
+
+type mockPowerOnController struct {
+	PoweredOn []string
+}
+
+func (m *mockPowerOnController) PowerOn(ctx context.Context, nodeName string, mac string) error {
+	m.PoweredOn = append(m.PoweredOn, nodeName)
+	return nil
+}
+
+func TestReconcile_ForcePowerOnAllNodes(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+
+	// Define a shared set of nodes
+	baseNodes := func() []runtime.Object {
+		return []runtime.Object{
+			// Should be powered on ✅
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+					Annotations: map[string]string{
+						nodeops.AnnotationPoweredOff: now.Add(-2 * time.Hour).Format(time.RFC3339),
+						"cba.dev/mac-address":        "00:11:22:33:44:55",
+					},
+				},
+				Spec: v1.NodeSpec{Unschedulable: true},
+			},
+			// Already on – should be skipped
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+				},
+				Spec: v1.NodeSpec{Unschedulable: false},
+			},
+			// Not managed – should be skipped
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node3",
+					Labels: map[string]string{
+						"unrelated-label": "true",
+					},
+					Annotations: map[string]string{
+						nodeops.AnnotationPoweredOff: now.Add(-1 * time.Hour).Format(time.RFC3339),
+						"cba.dev/mac-address":        "00:22:33:44:55:66",
+					},
+				},
+				Spec: v1.NodeSpec{Unschedulable: true},
+			},
+			// Missing MAC – should be skipped
+			&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node4",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+					Annotations: map[string]string{
+						nodeops.AnnotationPoweredOff: now.Add(-1 * time.Hour).Format(time.RFC3339),
+					},
+				},
+				Spec: v1.NodeSpec{Unschedulable: true},
+			},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		dryRun         bool
+		expectedCalled []string
+	}{
+		{
+			name:           "real run - powered off nodes should be powered on",
+			dryRun:         false,
+			expectedCalled: []string{"node1"},
+		},
+		{
+			name:           "dry run - no nodes should be powered on",
+			dryRun:         true,
+			expectedCalled: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(baseNodes()...)
+
+			state := nodeops.NewNodeStateTracker()
+			state.MarkShutdown("node1")
+			state.MarkShutdown("node3")
+			state.MarkShutdown("node4")
+
+			mockPower := &mockPowerOnController{}
+
+			reconciler := &controller.Reconciler{
+				Client: client,
+				Cfg: &config.Config{
+					ForcePowerOnAllNodes: true,
+					DryRun:               tt.dryRun,
+					NodeAnnotations: config.NodeAnnotationConfig{
+						MAC: "cba.dev/mac-address",
+					},
+					NodeLabels: config.NodeLabelConfig{
+						Managed: "scaling-managed-by-cba",
+					},
+				},
+				State:      state,
+				PowerOner:  mockPower,
+				Shutdowner: &noopShutdownController{},
+			}
+
+			err := reconciler.Reconcile(ctx)
+			require.NoError(t, err)
+			require.ElementsMatch(t, tt.expectedCalled, mockPower.PoweredOn)
+		})
+	}
+}
+
+func TestReconcile_GlobalCooldown(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name            string
+		lastShutdownAgo time.Duration
+		cooldown        time.Duration
+		dryRun          bool
+		expectSkipped   bool
+	}{
+		{
+			name:            "cooldown active - real run",
+			lastShutdownAgo: 30 * time.Second,
+			cooldown:        1 * time.Minute,
+			dryRun:          false,
+			expectSkipped:   false,
+		},
+		{
+			name:            "cooldown expired - real run",
+			lastShutdownAgo: 2 * time.Minute,
+			cooldown:        1 * time.Minute,
+			dryRun:          false,
+			expectSkipped:   false,
+		},
+		{
+			name:            "cooldown active - dry run",
+			lastShutdownAgo: 30 * time.Second,
+			cooldown:        1 * time.Minute,
+			dryRun:          true,
+			expectSkipped:   true,
+		},
+		{
+			name:            "cooldown expired - dry run",
+			lastShutdownAgo: 2 * time.Minute,
+			cooldown:        1 * time.Minute,
+			dryRun:          true,
+			expectSkipped:   true, // dry-run disables actual power-on even if allowed
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			client := fake.NewSimpleClientset(&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+					Annotations: map[string]string{
+						nodeops.AnnotationPoweredOff: now.Add(-2 * time.Hour).Format(time.RFC3339),
+						"cba.dev/mac-address":        "00:11:22:33:44:55",
+					},
+				},
+				Spec: v1.NodeSpec{
+					Unschedulable: true,
+				},
+			})
+
+			state := nodeops.NewNodeStateTracker()
+			state.LastShutdownTime = now.Add(-tt.lastShutdownAgo)
+			state.MarkShutdown("node1")
+
+			mockPower := &mockPowerOnController{}
+
+			reconciler := &controller.Reconciler{
+				Client: client,
+				Cfg: &config.Config{
+					Cooldown:             tt.cooldown,
+					DryRun:               tt.dryRun,
+					ForcePowerOnAllNodes: true,
+					NodeAnnotations: config.NodeAnnotationConfig{
+						MAC: "cba.dev/mac-address",
+					},
+					NodeLabels: config.NodeLabelConfig{
+						Managed: "scaling-managed-by-cba",
+					},
+				},
+				State:      state,
+				PowerOner:  mockPower,
+				Shutdowner: &noopShutdownController{},
+			}
+
+			err := reconciler.Reconcile(ctx)
+			require.NoError(t, err)
+
+			if tt.expectSkipped {
+				require.Empty(t, mockPower.PoweredOn, "no nodes should be powered on in this case")
+			} else {
+				require.Equal(t, []string{"node1"}, mockPower.PoweredOn, "node1 should have been powered on")
+			}
+		})
+	}
 }
 
 func TestReconcile_ForcePowerOnAllNodes_DryRun(t *testing.T) {
-	t.Skip("TODO: dry-run should skip power-on even when force flag is set")
+	now := time.Now()
+
+	tests := []struct {
+		name          string
+		dryRun        bool
+		expectPowerOn bool
+	}{
+		{
+			name:          "force power on - real run",
+			dryRun:        false,
+			expectPowerOn: true,
+		},
+		{
+			name:          "force power on - dry run",
+			dryRun:        true,
+			expectPowerOn: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			client := fake.NewSimpleClientset(&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+					Annotations: map[string]string{
+						nodeops.AnnotationPoweredOff: now.Add(-1 * time.Hour).Format(time.RFC3339),
+						"cba.dev/mac-address":        "00:11:22:33:44:55",
+					},
+				},
+				Spec: v1.NodeSpec{
+					Unschedulable: true,
+				},
+			})
+
+			state := nodeops.NewNodeStateTracker()
+			state.MarkShutdown("node1")
+
+			mockPower := &mockPowerOnController{}
+
+			reconciler := &controller.Reconciler{
+				Client: client,
+				Cfg: &config.Config{
+					DryRun:               tt.dryRun,
+					ForcePowerOnAllNodes: true,
+					NodeAnnotations: config.NodeAnnotationConfig{
+						MAC: "cba.dev/mac-address",
+					},
+					NodeLabels: config.NodeLabelConfig{
+						Managed: "scaling-managed-by-cba",
+					},
+				},
+				State:      state,
+				PowerOner:  mockPower,
+				Shutdowner: &noopShutdownController{},
+			}
+
+			err := reconciler.Reconcile(ctx)
+			require.NoError(t, err)
+
+			if tt.expectPowerOn {
+				require.Equal(t, []string{"node1"}, mockPower.PoweredOn, "node should have been powered on")
+			} else {
+				require.Empty(t, mockPower.PoweredOn, "dry-run should skip actual power-on")
+			}
+		})
+	}
+}
+
+func TestMaybeScaleUp_Success(t *testing.T) {
+	t.Skip("TODO: implement successful scale-up with node power-on")
+}
+
+func TestPickScaleDownCandidate(t *testing.T) {
+	t.Skip("TODO: test candidate selection logic based on minNodes and eligible list")
+}
+
+func TestCordonAndDrain_Success(t *testing.T) {
+	t.Skip("TODO: implement happy path for successful eviction and drain")
+}
+
+func TestRestorePoweredOffState(t *testing.T) {
+	t.Skip("TODO: test detection of powered-off nodes from annotation and active list")
+}
+
+func TestAnnotatePoweredOffNode_PatchError(t *testing.T) {
+	t.Skip("TODO: simulate patch failure and verify error is handled/logged")
 }
