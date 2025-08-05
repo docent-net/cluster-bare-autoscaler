@@ -1,0 +1,30 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%  # Allow small fluctuations
+
+ignore:
+  # Entrypoint — not testable
+  - "main.go"
+
+  # Side-effect-only setup (OpenTelemetry, metrics)
+  - "pkg/metrics/*"
+  - "pkg/tracing/*"
+
+  # Daemon binary packages (low value for unit tests)
+  - "metrics-daemonset/*"
+  - "poweroff-daemonset/*"
+  - "wol-agent/*"
+
+  # External helpers (optional)
+  - "pkg/kubeclient/config.go"  # Ignore if you decide not to test kubeconfig fallback
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false

@@ -23,14 +23,13 @@ jobs:
         run: go vet ./...
 
       - name: Run tests with coverage
-        run: go test -v -cover ./...
-
-      - name: Generate coverage report
-        run: go test -coverprofile=coverage.out ./...
+        run: go test -v -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}  # Required if your repo is private
+          token: ${{ secrets.CODECOV_TOKEN }}  # Required only for private repos
           files: coverage.out
-
+          flags: unittests
+          name: codecov-report
+          fail_ci_if_error: true
