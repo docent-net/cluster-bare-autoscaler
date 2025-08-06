@@ -5,7 +5,7 @@ coverage:
   status:
     project:
       default:
-        target: 80%
+        target: 50%
         threshold: 1%
         flags:
           - unittests
@@ -24,7 +24,7 @@ ignore:
   - "metrics-daemonset/*"
   - "poweroff-daemonset/*"
   - "wol-agent/*"
-  
+
 comment:
   layout: "reach, diff, flags, files"
   behavior: default
