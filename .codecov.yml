@@ -5,25 +5,26 @@ coverage:
   status:
     project:
       default:
-        target: auto
-        threshold: 1%  # Allow small fluctuations
+        target: 80%
+        threshold: 1%
+        flags:
+          - unittests
+
+flags:
+  unittests:
+    paths:
+      - pkg/
 
 ignore:
   # Entrypoint — not testable
   - "main.go"
-
-  # Side-effect-only setup (OpenTelemetry, metrics)
-  - "pkg/metrics/*"
-  - "pkg/tracing/*"
+  - "internal/bootstrap/*"
 
   # Daemon binary packages (low value for unit tests)
   - "metrics-daemonset/*"
   - "poweroff-daemonset/*"
   - "wol-agent/*"
-
-  # External helpers (optional)
-  - "pkg/kubeclient/config.go"  # Ignore if you decide not to test kubeconfig fallback
-
+  
 comment:
   layout: "reach, diff, flags, files"
   behavior: default

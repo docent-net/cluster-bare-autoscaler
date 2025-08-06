@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/docent-net/cluster-bare-autoscaler/internal/bootstrap/metrics"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"k8s.io/client-go/util/retry"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
@@ -19,7 +20,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/power"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/strategy"
 )

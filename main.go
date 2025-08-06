@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"github.com/docent-net/cluster-bare-autoscaler/internal/bootstrap/metrics"
+	"github.com/docent-net/cluster-bare-autoscaler/internal/bootstrap/tracing"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -14,8 +16,6 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/controller"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/kubeclient"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/metrics"
-	"github.com/docent-net/cluster-bare-autoscaler/pkg/tracing"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 )
 
