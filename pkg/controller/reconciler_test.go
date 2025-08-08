@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
 	"testing"
@@ -603,15 +604,231 @@ func TestReconcile_ForcePowerOnAllNodes_DryRun(t *testing.T) {
 }
 
 func TestMaybeScaleUp_Success(t *testing.T) {
-	t.Skip("TODO: implement successful scale-up with node power-on")
+	type testCase struct {
+		name   string
+		dryRun bool
+		expect []string
+	}
+	for _, tc := range []testCase{
+		{name: "real run - should power on node", dryRun: false, expect: []string{"node1"}},
+		{name: "dry run - should not power on node", dryRun: true, expect: []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(&v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Labels: map[string]string{
+						"scaling-managed-by-cba": "true",
+					},
+					Annotations: map[string]string{
+						"cba.dev/mac-address": "00:11:22:33:44:55",
+					},
+				},
+			})
+
+			state := nodeops.NewNodeStateTracker()
+			mockPower := &mockPowerOnController{}
+
+			// Mock scale-up strategy: always returns "node1", true, nil
+			strategy := &mockScaleUpStrategy{
+				node:  "node1",
+				ok:    true,
+				cause: nil,
+			}
+
+			reconciler := &controller.Reconciler{
+				Client: client,
+				Cfg: &config.Config{
+					DryRun: tc.dryRun,
+					NodeLabels: config.NodeLabelConfig{
+						Managed: "scaling-managed-by-cba",
+					},
+					NodeAnnotations: config.NodeAnnotationConfig{
+						MAC: "cba.dev/mac-address",
+					},
+				},
+				State:           state,
+				PowerOner:       mockPower,
+				ScaleUpStrategy: strategy,
+			}
+
+			ok := reconciler.MaybeScaleUp(context.Background())
+			require.True(t, ok, "scale-up should return true in happy path")
+			require.ElementsMatch(t, tc.expect, mockPower.PoweredOn)
+		})
+	}
 }
 
+// Mock scale-up strategy for testing
+type mockScaleUpStrategy struct {
+	node  string
+	ok    bool
+	cause error
+}
+
+func (m *mockScaleUpStrategy) ShouldScaleUp(ctx context.Context) (string, bool, error) {
+	return m.node, m.ok, m.cause
+}
+
+func (m *mockScaleUpStrategy) Name() string { return "mock" }
+
 func TestPickScaleDownCandidate(t *testing.T) {
-	t.Skip("TODO: test candidate selection logic based on minNodes and eligible list")
+	type scenario struct {
+		name         string
+		eligible     []string
+		minNodes     int
+		expectedNode string // empty string means expect nil
+	}
+	cases := []scenario{
+		{
+			name:         "multiple eligible, minNodes smaller — pick last",
+			eligible:     []string{"node1", "node2", "node3"},
+			minNodes:     2,
+			expectedNode: "node3",
+		},
+		{
+			name:         "minNodes equals eligible — returns nil",
+			eligible:     []string{"node1", "node2"},
+			minNodes:     2,
+			expectedNode: "",
+		},
+		{
+			name:         "minNodes greater than eligible — returns nil",
+			eligible:     []string{"node1"},
+			minNodes:     2,
+			expectedNode: "",
+		},
+		{
+			name:         "minNodes zero, many eligible — pick last",
+			eligible:     []string{"nodeA", "nodeB"},
+			minNodes:     0,
+			expectedNode: "nodeB",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eligible := make([]*nodeops.NodeWrapper, 0, len(tc.eligible))
+			for _, n := range tc.eligible {
+				eligible = append(eligible, &nodeops.NodeWrapper{Node: &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: n}}})
+			}
+			reconciler := &controller.Reconciler{
+				Cfg: &config.Config{MinNodes: tc.minNodes},
+			}
+			node := reconciler.PickScaleDownCandidate(eligible)
+			if tc.expectedNode == "" {
+				require.Nil(t, node)
+			} else {
+				require.NotNil(t, node)
+				require.Equal(t, tc.expectedNode, node.Name)
+			}
+		})
+	}
+
 }
 
 func TestCordonAndDrain_Success(t *testing.T) {
-	t.Skip("TODO: implement happy path for successful eviction and drain")
+	type testCase struct {
+		name        string
+		dryRun      bool
+		expectEvict bool
+	}
+	for _, tc := range []testCase{
+		{name: "real run - evict pod", dryRun: false, expectEvict: true},
+		{name: "dry run - do not evict", dryRun: true, expectEvict: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			nodeName := "node1"
+
+			// Node to cordon/drain
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Spec: v1.NodeSpec{
+					Unschedulable: false,
+				},
+			}
+
+			// Normal pod (should be evicted)
+			evictMe := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "evict-me",
+					Namespace: "default",
+					UID:       "evictme-uid",
+				},
+				Spec: v1.PodSpec{
+					NodeName: nodeName,
+				},
+			}
+
+			// Mirror pod (should NOT be evicted)
+			mirrorPod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mirror-pod",
+					Namespace: "default",
+					UID:       "mirrorpod-uid",
+					Annotations: map[string]string{
+						"kubernetes.io/config.mirror": "true",
+					},
+				},
+				Spec: v1.PodSpec{
+					NodeName: nodeName,
+				},
+			}
+
+			// DaemonSet pod (should NOT be evicted)
+			dsPod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ds-pod",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{
+						Kind:       "DaemonSet",
+						Name:       "ds-owner",
+						Controller: func() *bool { b := true; return &b }(),
+					}},
+				},
+				Spec: v1.PodSpec{
+					NodeName: nodeName,
+				},
+			}
+
+			client := fake.NewSimpleClientset(node, evictMe, mirrorPod, dsPod)
+
+			var evictedPods []string
+			client.Fake.PrependReactor("create", "pods/eviction", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				obj := action.(k8stesting.CreateAction).GetObject()
+				if e, ok := obj.(*policyv1.Eviction); ok {
+					evictedPods = append(evictedPods, e.Name)
+					return true, nil, nil
+				}
+				return false, nil, nil
+			})
+
+			r := &controller.Reconciler{
+				Client: client,
+				Cfg:    &config.Config{DryRun: tc.dryRun},
+			}
+
+			nw := &nodeops.NodeWrapper{Node: node}
+			err := r.CordonAndDrain(ctx, nw)
+			require.NoError(t, err, "CordonAndDrain should succeed")
+
+			updated, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+			require.NoError(t, err)
+			if !tc.dryRun {
+				require.True(t, updated.Spec.Unschedulable, "node should be unschedulable")
+			}
+
+			if tc.expectEvict {
+				require.Contains(t, evictedPods, "evict-me", "evict-me pod should have been evicted")
+				require.NotContains(t, evictedPods, "mirror-pod", "mirror pod should NOT be evicted (fix filtering logic if this fails!)")
+				require.NotContains(t, evictedPods, "ds-pod", "daemonset pod should NOT be evicted (fix filtering logic if this fails!)")
+			} else {
+				require.Empty(t, evictedPods, "no pods should be evicted in dry-run mode")
+			}
+		})
+	}
 }
 
 func TestRestorePoweredOffState(t *testing.T) {
