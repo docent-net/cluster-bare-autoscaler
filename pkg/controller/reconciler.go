@@ -58,7 +58,7 @@ func NewReconciler(cfg *config.Config, client kubernetes.Interface, metricsClien
 	r.ScaleDownStrategy = buildScaleDownStrategy(cfg, client, metricsClient, r)
 	r.ScaleUpStrategy = buildScaleUpStrategy(cfg, r)
 
-	r.restorePoweredOffState(context.Background())
+	r.RestorePoweredOffState(context.Background())
 	return r
 }
 
@@ -196,7 +196,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (r *Reconciler) restorePoweredOffState(ctx context.Context) {
+func (r *Reconciler) RestorePoweredOffState(ctx context.Context) {
 	nodeList, err := r.Client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		slog.Warn("Failed to list nodes while restoring powered-off State", "err", err)

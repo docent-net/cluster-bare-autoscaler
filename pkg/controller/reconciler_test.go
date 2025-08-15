@@ -831,10 +831,251 @@ func TestCordonAndDrain_Success(t *testing.T) {
 	}
 }
 
-func TestRestorePoweredOffState(t *testing.T) {
-	t.Skip("TODO: test detection of powered-off nodes from annotation and active list")
+func TestRestorePoweredOffState_Variants(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// shared node reactors: first List => active only; second+ => full managed set
+	newClientWithReactor := func() *fake.Clientset {
+		client := fake.NewSimpleClientset()
+		var listCount int
+		client.Fake.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+			listCount++
+			if listCount == 1 {
+				return true, &v1.NodeList{Items: []v1.Node{{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-active-managed",
+						Labels: map[string]string{"scaling-managed-by-cba": "true"},
+					},
+				}}}, nil
+			}
+			return true, &v1.NodeList{Items: []v1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-active-managed", Labels: map[string]string{"scaling-managed-by-cba": "true"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-missing-managed", Labels: map[string]string{"scaling-managed-by-cba": "true"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-managed-disabled", Labels: map[string]string{"scaling-managed-by-cba": "true", "cba.dev/disabled": "true"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-ignored", Labels: map[string]string{"scaling-managed-by-cba": "true", "ignore.me": "true"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-unmanaged", Labels: map[string]string{"some-other": "true"}}},
+			}}, nil
+		})
+		return client
+	}
+
+	cfg := &config.Config{
+		NodeLabels:   config.NodeLabelConfig{Managed: "scaling-managed-by-cba", Disabled: "cba.dev/disabled"},
+		IgnoreLabels: map[string]string{"ignore.me": "true"},
+	}
+
+	// shared assertion
+	assertPoweredOff := func(t *testing.T, r *controller.Reconciler, client *fake.Clientset) {
+		t.Helper()
+		require.True(t, r.State.IsPoweredOff("node-missing-managed"))
+		require.False(t, r.State.IsPoweredOff("node-active-managed"))
+		require.False(t, r.State.IsPoweredOff("node-managed-disabled"))
+		require.False(t, r.State.IsPoweredOff("node-ignored"))
+		require.False(t, r.State.IsPoweredOff("node-unmanaged"))
+
+		// cross-check via nodeops
+		offNames, err := nodeops.ListShutdownNodeNames(ctx, client,
+			nodeops.ManagedNodeFilter{
+				ManagedLabel:  r.Cfg.NodeLabels.Managed,
+				DisabledLabel: r.Cfg.NodeLabels.Disabled,
+				IgnoreLabels:  r.Cfg.IgnoreLabels,
+			},
+			r.State,
+		)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"node-missing-managed"}, offNames)
+	}
+
+	cases := []struct {
+		name string
+		runs int
+		via  string // "direct" or "constructor"
+	}{
+		{"direct_once", 1, "direct"},
+		{"constructor_twice_idempotent", 2, "constructor"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := 0; i < tc.runs; i++ {
+				client := newClientWithReactor()
+				state := nodeops.NewNodeStateTracker()
+				r := &controller.Reconciler{Client: client, Cfg: cfg, State: state}
+
+				if tc.via == "direct" {
+					r.RestorePoweredOffState(ctx)
+				} else {
+					// constructor path also leads to the same restored state
+					r = controller.NewReconciler(cfg, client, nil)
+				}
+				assertPoweredOff(t, r, client)
+			}
+		})
+	}
 }
 
 func TestAnnotatePoweredOffNode_PatchError(t *testing.T) {
-	t.Skip("TODO: simulate patch failure and verify error is handled/logged")
+	ctx := context.Background()
+
+	// Start with a managed node present in the fake cluster.
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+	})
+
+	// Make PATCH /nodes fail.
+	client.Fake.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated patch error")
+	})
+
+	state := nodeops.NewNodeStateTracker()
+	wrapped := nodeops.NewNodeWrapper(
+		&v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+				Labels: map[string]string{
+					"scaling-managed-by-cba": "true",
+				},
+			},
+		},
+		state,
+		time.Now(),
+		nodeops.NodeAnnotationConfig{},
+		nil,
+	)
+
+	r := &controller.Reconciler{
+		Client: client,
+		Cfg:    &config.Config{DryRun: false},
+		State:  state,
+	}
+
+	// Act: attempt to annotate; expect error propagated from PATCH.
+	err := r.AnnotatePoweredOffNode(ctx, wrapped)
+	require.Error(t, err, "AnnotatePoweredOffNode should return the patch error") // :contentReference[oaicite:0]{index=0}
+	require.Contains(t, err.Error(), "simulated patch error")
+
+	// The node should not have the powered-off annotation after a failed patch.
+	got, getErr := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
+	require.NoError(t, getErr)
+	require.NotContains(t, got.Annotations, nodeops.AnnotationPoweredOff, "annotation must not be present after failed patch") // :contentReference[oaicite:1]{index=1}
+}
+
+// --- test-only helpers at package scope ---
+
+// shutdownMock records Shutdown invocations.
+type shutdownMock struct{ calls int }
+
+func (m *shutdownMock) Shutdown(ctx context.Context, node string) error {
+	m.calls++
+	return nil
+}
+
+// alwaysAllowStrategy approves scale-down for the named candidate.
+type alwaysAllowStrategy struct{ candidate string }
+
+func (s *alwaysAllowStrategy) ShouldScaleDown(_ context.Context, node string) (bool, error) {
+	return node == s.candidate, nil
+}
+func (s *alwaysAllowStrategy) Name() string { return "allow-all" }
+
+// --- the actual test ---
+
+func TestMaybeScaleDown_AnnotatePatchError_AllowsShutdownAndMarksState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Fake cluster with one managed node.
+	client := fake.NewSimpleClientset(&v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"scaling-managed-by-cba": "true",
+			},
+		},
+		Spec: v1.NodeSpec{Unschedulable: false},
+	})
+
+	// Make PATCH /nodes fail to simulate annotate error.
+	client.Fake.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated patch failure")
+	})
+
+	// Minimal config: labels used by tests.
+	cfg := &config.Config{
+		DryRun: false,
+		NodeLabels: config.NodeLabelConfig{
+			Managed:  "scaling-managed-by-cba",
+			Disabled: "cba.dev/disabled",
+		},
+		MinNodes: 0,
+	}
+
+	sm := &shutdownMock{}
+	state := nodeops.NewNodeStateTracker()
+
+	r := &controller.Reconciler{
+		Cfg:               cfg,
+		Client:            client,
+		State:             state,
+		Shutdowner:        sm,
+		Metrics:           &FakeMetrics{},
+		ScaleDownStrategy: &alwaysAllowStrategy{candidate: "node1"},
+	}
+
+	// Build candidate wrapper; no pods so CordonAndDrain succeeds.
+	nodeObj, err := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
+	require.NoError(t, err)
+	wrapped := nodeops.NewNodeWrapper(nodeObj, state, time.Now(), nodeops.NodeAnnotationConfig{}, cfg.IgnoreLabels)
+
+	ok := r.MaybeScaleDown(ctx, []*nodeops.NodeWrapper{wrapped})
+	require.True(t, ok, "scale-down should proceed even if annotation patch fails") // annotation error is warned-only. :contentReference[oaicite:1]{index=1}
+
+	// Shutdown must have been called.
+	require.Equal(t, 1, sm.calls, "Shutdown should be invoked despite annotate error") // :contentReference[oaicite:2]{index=2}
+
+	// State marked powered off (because not DryRun).
+	require.True(t, state.IsPoweredOff("node1"), "node should be marked powered-off in memory") // :contentReference[oaicite:3]{index=3}
+
+	// Annotation should NOT exist since PATCH failed.
+	got, err := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotContains(t, got.Annotations, nodeops.AnnotationPoweredOff, "annotation should be absent after failed patch")
+
+	// Cross-check visible powered-off set via nodeops helper.
+	offNames, err := nodeops.ListShutdownNodeNames(ctx, client,
+		nodeops.ManagedNodeFilter{
+			ManagedLabel:  cfg.NodeLabels.Managed,
+			DisabledLabel: cfg.NodeLabels.Disabled,
+			IgnoreLabels:  cfg.IgnoreLabels,
+		},
+		state,
+	)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"node1"}, offNames)
+}
+
+func TestMaybeScaleDown_ShutdownError_ClearsAnnotation(t *testing.T) {
+	t.Skip("TODO: Simulate successful AnnotatePoweredOffNode, then have Shutdown() return an error. Verify that ClearPoweredOffAnnotation is attempted and state is still marked powered-off.")
+}
+
+func TestShutdownNodeNames_ListError(t *testing.T) {
+	t.Skip("TODO: Force node client.List() to return an error in shutdownNodeNames(). Verify it returns nil slice and handles error without panic.")
+}
+
+func TestListActiveNodes_FilteringMatrix(t *testing.T) {
+	t.Skip("TODO: Create a set of nodes: cordoned, NotReady, ignored by label, powered-off (via annotation & via state), and one healthy managed node. Verify only the healthy one is returned by listActiveNodes().")
+}
+
+func TestReconcile_RecoversUnexpectedlyBootedNodes(t *testing.T) {
+	t.Skip("TODO: Seed a Ready, cordoned managed node with powered-off annotation. Run Reconcile() and verify it uncordons and clears the annotation.")
+}
+
+func TestNewReconciler_StrategyWiring_WithLoadAverage(t *testing.T) {
+	t.Skip("TODO: Set LoadAverageStrategy.Enabled=true in config. Build reconciler with NewReconciler() and verify scale-down chain includes ResourceAware + LoadAverage, and scale-up chain includes MinNodeCount + LoadAverage with dry-run overrides.")
 }
