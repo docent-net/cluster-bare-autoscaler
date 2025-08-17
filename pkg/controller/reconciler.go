@@ -140,7 +140,7 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 			ClusterEvalMode:      strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 			ClusterWideThreshold: cfg.LoadAverageStrategy.ScaleUpThreshold,
 			DryRunOverride:       r.DryRunClusterLoadUp,
-			IgnoreLabels:         cfg.IgnoreLabels,
+			IgnoreLabels:         map[string]string{cfg.NodeLabels.Disabled: "true"}, // changed
 			ShutdownCandidates:   r.shutdownNodeNames,
 		})
 	}
@@ -191,7 +191,12 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 
 	eligible := r.filterEligibleNodes(allNodes.Items)
-	r.MaybeScaleDown(ctx, eligible)
+	if r.MaybeScaleDown(ctx, eligible) {
+		return nil
+	}
+
+	// maintenance: rotate overdue powered-off nodes
+	r.MaybeRotate(ctx)
 
 	return nil
 }
@@ -369,7 +374,7 @@ func (r *Reconciler) AnnotatePoweredOffNode(ctx context.Context, node *nodeops.N
 		return nil
 	}
 	slog.Debug("Annotating node as powered-off", "node", node.Name)
-	timestamp := metav1.Now().UTC().Format("2006-01-02T15:04:05Z")
+	timestamp := time.Now().UTC().Format(time.RFC3339)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp))
 	_, err := r.Client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
@@ -446,5 +451,228 @@ func (r *Reconciler) CordonAndDrain(ctx context.Context, node *nodeops.NodeWrapp
 	}
 
 	slog.Info("Node drained successfully", "node", node.Name)
+	return nil
+}
+
+// MaybeRotate performs a maintenance rotation when no scale up/down happened in this loop.
+// Flow:
+// 1) pick the oldest powered-off node whose off-age >= Rotation.MaxPoweredOffDuration (respect exempt & ignore labels)
+// 2) ensure there is an eligible active node we could power off (respect minNodes, cooldowns, ignore/disabled)
+// 3) if LoadAverage is enabled, ensure candidate node load < NodeThreshold AND cluster aggregate load (excluding candidate) < ScaleDownThreshold
+// 4) power-on the overdue node first (wait for Ready), clear its powered-off state/metrics
+// 5) re-list eligible nodes and shut down exactly one candidate
+// If power-on fails, abort the rotation without shutting anything down.
+func (r *Reconciler) MaybeRotate(ctx context.Context) {
+	if r.Cfg == nil || !r.Cfg.Rotation.Enabled || r.Cfg.Rotation.MaxPoweredOffDuration <= 0 {
+		return
+	}
+
+	// 1) discover the oldest overdue powered-off node
+	managed, err := nodeops.ListManagedNodes(ctx, r.Client, nodeops.ManagedNodeFilter{
+		ManagedLabel:  r.Cfg.NodeLabels.Managed,
+		DisabledLabel: r.Cfg.NodeLabels.Disabled,
+		IgnoreLabels:  r.Cfg.IgnoreLabels,
+	})
+	if err != nil || len(managed) == 0 {
+		if err != nil {
+			slog.Warn("rotation: listing managed nodes failed", "err", err)
+		}
+		return
+	}
+
+	now := time.Now().UTC()
+	var (
+		overdue *v1.Node
+		since   time.Time
+	)
+	for i := range managed {
+		n := managed[i]
+
+		// per-node exemption
+		if key := r.Cfg.Rotation.ExemptLabel; key != "" {
+			if val, ok := n.Labels[key]; ok && val != "" {
+				continue
+			}
+		}
+		// honor global ignore labels
+		if nodeops.ShouldIgnoreNodeDueToLabels(n, r.Cfg.IgnoreLabels) {
+			continue
+		}
+
+		if t, ok := nodeops.PoweredOffSince(n); ok {
+			age := now.Sub(t)
+			if age >= r.Cfg.Rotation.MaxPoweredOffDuration {
+				if overdue == nil || t.Before(since) {
+					overdue = &managed[i]
+					since = t
+				}
+			}
+		}
+	}
+	if overdue == nil {
+		// nothing overdue
+		return
+	}
+
+	// 2) ensure we have an eligible active node we could power off
+	allNodes, err := r.listAllNodes(ctx)
+	if err != nil {
+		slog.Warn("rotation: failed to list nodes", "err", err)
+		return
+	}
+	eligible := r.filterEligibleNodes(allNodes.Items)
+	if len(eligible) <= r.Cfg.MinNodes {
+		slog.Info("rotation: skip — eligible nodes at/below minNodes",
+			"eligible", len(eligible), "minNodes", r.Cfg.MinNodes)
+		return
+	}
+
+	// 3) if LoadAverage is enabled, enforce the same gates as scale-down
+	// Candidate selection also applies LA checks when enabled.
+	cand := r.PickRotationPoweroffCandidate(ctx, eligible)
+	if cand == nil {
+		slog.Info("rotation: skip — no suitable power-off candidate (gates or eligibility)")
+		return
+	}
+
+	slog.Info("rotation: powering on overdue node",
+		"node", overdue.Name, "poweredOffSince", since)
+
+	// 4) power-on first to keep capacity steady; wrapper will clear annotation & uncordon
+	wrapped := nodeops.NewNodeWrapper(overdue, r.State, now, nodeops.NodeAnnotationConfig{
+		MAC: r.Cfg.NodeAnnotations.MAC,
+	}, r.Cfg.IgnoreLabels)
+
+	if err := nodeops.PowerOnAndMarkBooted(ctx, wrapped, r.Cfg, r.Client, r.PowerOner, r.State, r.Cfg.DryRun); err != nil {
+		slog.Warn("rotation: power-on failed; aborting rotation", "node", overdue.Name, "err", err)
+		return
+	}
+	// clear powered-off state/metric like in scale-up
+	r.State.ClearPoweredOff(overdue.Name)
+	metrics.PoweredOffNodes.WithLabelValues(overdue.Name).Set(0)
+
+	// 5) re-evaluate candidates (freshly booted node will be excluded by boot cooldown)
+	allAfter, err := r.listAllNodes(ctx)
+	if err != nil {
+		slog.Warn("rotation: failed to list nodes post power-on", "err", err)
+		return
+	}
+	eligible = r.filterEligibleNodes(allAfter.Items)
+	if len(eligible) <= r.Cfg.MinNodes {
+		slog.Info("rotation: no longer safe to retire any node after power-on",
+			"eligible", len(eligible), "minNodes", r.Cfg.MinNodes)
+		return
+	}
+	cand = r.PickRotationPoweroffCandidate(ctx, eligible)
+	if cand == nil {
+		slog.Info("rotation: no suitable power-off candidate after power-on; leaving extra node online")
+		return
+	}
+
+	slog.Info("rotation: retiring active node", "rotatedIn", overdue.Name, "rotatedOut", cand.Name)
+
+	if err := r.CordonAndDrain(ctx, cand); err != nil {
+		slog.Warn("rotation: drain failed; keeping both nodes online", "node", cand.Name, "err", err)
+		_ = nodeops.ClearPoweredOffAnnotation(ctx, r.Client, cand.Name) // best-effort cleanup
+		return
+	}
+
+	if err := r.AnnotatePoweredOffNode(ctx, cand); err != nil {
+		slog.Warn("rotation: failed to annotate powered-off node", "node", cand.Name, "err", err)
+	}
+
+	metrics.ShutdownAttempts.Inc()
+	if err := r.Shutdowner.Shutdown(ctx, cand.Name); err != nil {
+		slog.Error("rotation: shutdown failed", "node", cand.Name, "err", err)
+		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, cand.Name); err != nil {
+			slog.Warn("rotation: failed to clear annotation after shutdown failure", "node", cand.Name, "err", err)
+		}
+		return
+	}
+
+	slog.Info("rotation: shutdown initiated", "node", cand.Name)
+	metrics.ShutdownSuccesses.Inc()
+	metrics.PoweredOffNodes.WithLabelValues(cand.Name).Set(1)
+	r.State.MarkGlobalShutdown()
+
+	if !r.Cfg.DryRun {
+		r.State.MarkShutdown(cand.Name)
+		r.State.MarkPoweredOff(cand.Name)
+	}
+}
+
+// PickRotationPoweroffCandidate applies optional LoadAverage checks to find a safe node to power off.
+// - Skips the node we just booted (excludeJustBooted).
+// - If LoadAverage is disabled, returns the same candidate as PickScaleDownCandidate().
+// - If enabled, requires:
+//   - candidate normalized load < NodeThreshold
+//   - cluster aggregate load (excluding candidate) < ScaleDownThreshold
+func (r *Reconciler) PickRotationPoweroffCandidate(ctx context.Context, eligible []*nodeops.NodeWrapper) *nodeops.NodeWrapper {
+	// If LoadAverage strategy is disabled, keep existing selection behavior.
+	if !r.Cfg.LoadAverageStrategy.Enabled {
+		return r.PickScaleDownCandidate(eligible)
+	}
+
+	// Build helpers once.
+	utils := strategy.NewClusterLoadUtils(
+		r.Client,
+		r.Cfg.LoadAverageStrategy.Namespace,
+		r.Cfg.LoadAverageStrategy.PodLabel,
+		r.Cfg.LoadAverageStrategy.Port,
+		time.Duration(r.Cfg.LoadAverageStrategy.TimeoutSeconds)*time.Second,
+	)
+	evalMode := strategy.ParseClusterEvalMode(r.Cfg.LoadAverageStrategy.ClusterEval)
+
+	// Try candidates until one passes both node and cluster checks.
+	for _, cand := range eligible {
+		// 1) Candidate node load check (normalized).
+		var nodeLoad float64
+		if r.DryRunNodeLoad != nil {
+			nodeLoad = *r.DryRunNodeLoad
+			slog.Info("MaybeRotate: dry-run node-load override in effect", "node", cand.Name, "load", nodeLoad)
+		} else {
+			val, err := utils.FetchNormalizedLoad(ctx, cand.Name)
+			if err != nil {
+				slog.Warn("MaybeRotate: failed to fetch node load, skipping candidate", "node", cand.Name, "err", err)
+				continue
+			}
+			nodeLoad = val
+		}
+
+		if nodeLoad >= r.Cfg.LoadAverageStrategy.NodeThreshold {
+			slog.Info("MaybeRotate: candidate load too high — skipping", "node", cand.Name, "load", nodeLoad, "threshold", r.Cfg.LoadAverageStrategy.NodeThreshold)
+			continue
+		}
+
+		// 2) Cluster aggregate load check (exclude the candidate).
+		agg, err := utils.GetClusterAggregateLoad(
+			ctx,
+			map[string]string{r.Cfg.NodeLabels.Disabled: "true"}, // changed: exclude only disabled
+			cand.Name,
+			r.DryRunClusterLoadDown,
+			evalMode,
+		)
+		if err != nil {
+			slog.Warn("MaybeRotate: failed to compute cluster aggregate load", "err", err)
+			continue
+		}
+
+		slog.Info("MaybeRotate: cluster-wide load evaluation (rotation)",
+			"aggregateLoad", agg,
+			"clusterWideThreshold", r.Cfg.LoadAverageStrategy.ScaleDownThreshold,
+			"evalMode", evalMode,
+		)
+
+		if agg >= r.Cfg.LoadAverageStrategy.ScaleDownThreshold {
+			// If aggregate is too high with ANY candidate removed, further candidates are unlikely to change the outcome meaningfully.
+			slog.Info("MaybeRotate: cluster-wide load too high to rotate safely — aborting", "aggregateLoad", agg, "threshold", r.Cfg.LoadAverageStrategy.ScaleDownThreshold)
+			return nil
+		}
+
+		// Candidate passes both checks.
+		return cand
+	}
+
+	// None passed.
 	return nil
 }

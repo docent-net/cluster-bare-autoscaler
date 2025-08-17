@@ -190,8 +190,11 @@ func FilterShutdownEligibleNodes(nodes []v1.Node, state *NodeStateTracker, now t
 
 func ShouldIgnoreNodeDueToLabels(node v1.Node, labels map[string]string) bool {
 	for k, v := range labels {
-		if val, ok := node.Labels[k]; ok && val == v {
-			return true
+		if val, ok := node.Labels[k]; ok {
+			// presence-only match (v == ""), or exact value match
+			if v == "" || v == val {
+				return true
+			}
 		}
 	}
 	return false

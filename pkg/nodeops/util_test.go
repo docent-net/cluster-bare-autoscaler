@@ -96,8 +96,10 @@ func TestPowerOnAndMarkBooted_HandlesPowerFailure(t *testing.T) {
 func TestClearPoweredOffAnnotation_Success(t *testing.T) {
 	client := corefake.NewSimpleClientset(&v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "node1",
-			Annotations: map[string]string{"cba.dev/powered-off": "true"},
+			Name: "node1",
+			Annotations: map[string]string{
+				nodeops.AnnotationPoweredOff: "true",
+			},
 		},
 	})
 	err := nodeops.ClearPoweredOffAnnotation(context.Background(), client, "node1")

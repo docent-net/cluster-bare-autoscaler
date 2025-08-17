@@ -51,7 +51,14 @@ type Config struct {
 	WolAgent             WolAgentConfig `yaml:"wolAgent"`
 	MACDiscoveryInterval time.Duration  `yaml:"macDiscoveryIntervalMin"`
 
-	ForcePowerOnAllNodes bool `yaml:"forcePowerOnAllNodes"`
+	ForcePowerOnAllNodes bool           `yaml:"forcePowerOnAllNodes"`
+	Rotation             RotationConfig `yaml:"rotation"`
+}
+
+type RotationConfig struct {
+	Enabled               bool          `yaml:"enabled"`
+	MaxPoweredOffDuration time.Duration `yaml:"maxPoweredOffDuration"` // e.g. "168h"
+	ExemptLabel           string        `yaml:"exemptLabel"`           // if set, nodes with this label are never rotated
 }
 
 type LoadAverageStrategyConfig struct {

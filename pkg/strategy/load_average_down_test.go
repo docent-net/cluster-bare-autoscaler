@@ -8,6 +8,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	corefake "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
 )
 
 func TestDryRunOverride(t *testing.T) {
@@ -195,6 +197,9 @@ func newTestStrategyWithDefaults(t *testing.T, name string, opts ...func(*LoadAv
 		ClusterEvalMode: ClusterEvalNone,
 		IgnoreLabels:    map[string]string{},
 	}
+
+	strategy.Cfg = &config.Config{}
+	strategy.Cfg.NodeLabels.Disabled = "cba.dev/disabled"
 
 	for _, opt := range opts {
 		opt(strategy)

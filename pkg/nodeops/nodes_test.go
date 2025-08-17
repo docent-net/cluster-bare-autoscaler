@@ -501,3 +501,83 @@ func TestIsNodeReady(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldIgnoreNodeDueToLabels_PresenceOnly(t *testing.T) {
+	node := v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"node-role.kubernetes.io/control-plane": "",
+			},
+		},
+	}
+	// presence-only rule: value in rule is "", node has the key => should ignore
+	rule := map[string]string{"node-role.kubernetes.io/control-plane": ""}
+
+	if !nodeops.ShouldIgnoreNodeDueToLabels(node, rule) {
+		t.Fatalf("expected node to be ignored by presence-only rule")
+	}
+}
+
+func TestShouldIgnoreNodeDueToLabels_ValueMatch(t *testing.T) {
+	node := v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"node-home-assistant": "yes",
+			},
+		},
+	}
+	// exact value match should ignore
+	if !nodeops.ShouldIgnoreNodeDueToLabels(node, map[string]string{"node-home-assistant": "yes"}) {
+		t.Fatalf("expected node to be ignored by exact value match")
+	}
+	// value mismatch should NOT ignore
+	if nodeops.ShouldIgnoreNodeDueToLabels(node, map[string]string{"node-home-assistant": "no"}) {
+		t.Fatalf("did not expect node to be ignored when values differ")
+	}
+}
+
+func TestRecoverUnexpectedlyBootedNodes_SkipsWhenIgnoredByLabels(t *testing.T) {
+	ctx := context.Background()
+
+	n := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ignored-cp-node",
+			Labels: map[string]string{
+				"cba.dev/is-managed":                    "true",
+				"node-role.kubernetes.io/control-plane": "",
+			},
+			Annotations: map[string]string{
+				"cba.dev/was-powered-off": "true",
+			},
+		},
+		Spec: v1.NodeSpec{Unschedulable: true},
+		Status: v1.NodeStatus{
+			Conditions: []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionTrue}},
+		},
+	}
+
+	client := corefake.NewSimpleClientset(n)
+	cfg := &config.Config{
+		NodeLabels: config.NodeLabelConfig{
+			Managed:  "cba.dev/is-managed",
+			Disabled: "cba.dev/disabled",
+		},
+		// presence-only ignore rule — should skip recovery
+		IgnoreLabels: map[string]string{"node-role.kubernetes.io/control-plane": ""},
+	}
+
+	if err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, client, cfg, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, err := client.CoreV1().Nodes().Get(ctx, n.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	if !updated.Spec.Unschedulable {
+		t.Fatalf("expected node to remain cordoned because it is ignored")
+	}
+	if _, has := updated.Annotations[nodeops.AnnotationPoweredOff]; !has {
+		t.Fatalf("expected powered-off annotation to remain because node is ignored")
+	}
+}

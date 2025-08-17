@@ -22,6 +22,15 @@ pollInterval: 60s                  # Interval between reconcile loops
 forcePowerOnAllNodes: false       # If set to true, CBA will power on all nodes regardless of current load.
 
 # ──────────────────────────────────────────────
+# Wear rotation
+# ──────────────────────────────────────────────
+
+rotation:
+  enabled: false                # default: false
+  maxPoweredOffDuration: 72 h   # required when enabled; Go duration (e.g., "72h", "30m")
+  exemptLabel: "cba.dev/rotation-exempt"  # optional label key; nodes carrying this key are never rotated back
+
+# ──────────────────────────────────────────────
 # Resource Buffer Settings
 # ──────────────────────────────────────────────
 

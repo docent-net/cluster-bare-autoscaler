@@ -70,7 +70,7 @@ func (l *LoadAverageScaleDown) getClusterAggregateLoad(ctx context.Context, excl
 	utils := NewClusterLoadUtils(l.Client, l.Namespace, l.PodLabel, l.HTTPPort, l.HTTPTimeout)
 	return utils.GetClusterAggregateLoad(
 		ctx,
-		l.IgnoreLabels,
+		map[string]string{l.Cfg.NodeLabels.Disabled: "true"},
 		excludeNode,
 		l.DryRunClusterLoadOverride,
 		l.ClusterEvalMode,
