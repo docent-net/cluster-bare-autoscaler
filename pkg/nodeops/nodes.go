@@ -9,6 +9,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"log/slog"
 	"math/rand"
+	"sort"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -21,8 +22,6 @@ type ManagedNodeFilter struct {
 	DisabledLabel string
 	IgnoreLabels  map[string]string
 }
-
-const AnnotationPoweredOff = "cba.dev/was-powered-off"
 
 // WrapNodes transforms a list of v1.Node objects into []*NodeWrapper.
 //
@@ -75,22 +74,40 @@ outer:
 }
 
 // ListShutdownNodeNames returns the names of nodes that are both managed and currently marked as powered off,
-// either by annotation or in internal state tracker.
+// either by annotation or in internal state tracker. Nodes are sorted by the oldest powered-off first.
 func ListShutdownNodeNames(ctx context.Context, client kubernetes.Interface, filter ManagedNodeFilter, tracker *NodeStateTracker) ([]string, error) {
 	nodes, err := ListManagedNodes(ctx, client, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	var shutdown []string
+	type item struct {
+		name  string
+		since time.Time
+	}
+	var list []item
 
 	for _, node := range nodes {
-		if node.Annotations[AnnotationPoweredOff] == "true" || tracker.IsPoweredOff(node.Name) {
-			shutdown = append(shutdown, node.Name)
+		if t, ok := PoweredOffSince(node); ok {
+			list = append(list, item{name: node.Name, since: t})
+			continue
+		}
+		if tracker.IsPoweredOff(node.Name) {
+			// No annotation timestamp (legacy/in-memory) → treat as very old to rotate first
+			list = append(list, item{name: node.Name, since: time.Unix(0, 0).UTC()})
 		}
 	}
 
-	return shutdown, nil
+	// Oldest powered-off first
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].since.Before(list[j].since)
+	})
+
+	out := make([]string, len(list))
+	for i := range list {
+		out[i] = list[i].name
+	}
+	return out, nil
 }
 
 type ActiveNodeFilter struct {

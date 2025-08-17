@@ -179,3 +179,33 @@ func TestNodeWrapper_IsInBootCooldown(t *testing.T) {
 		t.Error("expected node to be outside boot cooldown")
 	}
 }
+
+func TestNodeWrapper_IsMarkedPoweredOff_ByAnnotation(t *testing.T) {
+	n := v1.Node{
+		ObjectMeta: mkObjMeta(map[string]string{nodeops.AnnotationPoweredOff: time.Now().UTC().Format(time.RFC3339)}),
+	}
+	w := nodeops.NewNodeWrapper(&n, nil, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+	if !w.IsMarkedPoweredOff() {
+		t.Fatalf("expected true when annotation present")
+	}
+}
+
+func TestNodeWrapper_IsMarkedPoweredOff_ByStateTracker(t *testing.T) {
+	state := nodeops.NewNodeStateTracker()
+	n := v1.Node{ObjectMeta: mkObjMeta(nil)}
+	n.Name = "node-1"
+
+	state.MarkPoweredOff("node-1")
+	w := nodeops.NewNodeWrapper(&n, state, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+	if !w.IsMarkedPoweredOff() {
+		t.Fatalf("expected true when state tracker is powered-off")
+	}
+}
+
+func TestNodeWrapper_IsMarkedPoweredOff_FalseWhenNone(t *testing.T) {
+	n := v1.Node{ObjectMeta: mkObjMeta(nil)}
+	w := nodeops.NewNodeWrapper(&n, nil, time.Now(), nodeops.NodeAnnotationConfig{}, nil)
+	if w.IsMarkedPoweredOff() {
+		t.Fatalf("expected false")
+	}
+}

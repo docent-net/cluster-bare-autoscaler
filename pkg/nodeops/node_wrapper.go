@@ -74,7 +74,7 @@ func (n *NodeWrapper) IsReady() bool {
 }
 
 func (n *NodeWrapper) IsMarkedPoweredOff() bool {
-	if val, ok := n.Annotations[AnnotationPoweredOff]; ok && val == "true" {
+	if _, ok := n.Annotations[AnnotationPoweredOff]; ok {
 		return true
 	}
 	return n.State != nil && n.State.IsPoweredOff(n.Name)
