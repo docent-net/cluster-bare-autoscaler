@@ -96,7 +96,7 @@ func (n *NodeWrapper) GetEffectiveMACAddress() string {
 	}
 	key := n.MACKeys.MAC
 	if key == "" {
-		key = DefaultMACAnnotation
+		key = AnnotationMACAuto
 	}
 	return n.Annotations[key]
 }

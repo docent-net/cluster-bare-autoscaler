@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-const (
-	AnnotationMACAuto   = "cba.dev/mac-address"
-	AnnotationMACManual = "cba.dev/mac-address-override"
-)
-
 var (
 	FindPodIPFunc = FindPodIPOnNode
 	FetchMACFunc  = FetchMACFromDaemon

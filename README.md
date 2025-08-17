@@ -22,30 +22,33 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 
 ## Features
 
-- ✅ Pluggable scale-down and scale-up strategies  
+- Pluggable scale-down and scale-up strategies  
   - Multi-strategy chaining with short-circuit logic  
   - Dry-run mode for testing (`--dry-run`)  
-- ✅ Resource-aware scale-down  
+- Resource-aware scale-down  
   - Considers CPU and memory requests  
   - Optionally uses live usage metrics  
-- ✅ Load average-aware scale-down and scale-up using `/proc/loadavg`  
+- Load average-aware scale-down and scale-up using `/proc/loadavg`  
   - Supports aggregation modes: `average`, `median`, `p75`, `p90`  
   - Separate thresholds for scale-up and scale-down decisions  
   - CLI dry-run overrides:  
     - `--dry-run-cluster-load-down`  
     - `--dry-run-cluster-load-up`  
-- ✅ MinNodeCount-based scale-up to maintain minimum node count  
-- ✅ Cooldown tracking  
+- MinNodeCount-based scale-up to maintain minimum node count  
+- Cooldown tracking  
   - Global cooldown period  
   - Per-node boot/shutdown cooldowns  
-- ✅ Node eligibility filtering  
+- Node eligibility filtering  
   - Ignores nodes with label `cba.dev/was-powered-off: true`  
   - Respects `.Disabled` flag in `config.yaml`  
-- ✅ Safe cordon and drain using Kubernetes eviction API  
-- ✅ Wake-on-LAN support for powering on bare-metal machines  
-- ✅ Force power-on mode for maintenance
+- Safe cordon and drain using Kubernetes eviction API  
+- Wake-on-LAN support for powering on bare-metal machines  
+- Force power-on mode for maintenance
   - `forcePowerOnAllNodes: true` forces all previously powered-off nodes to be booted
   - Automatically clears `was-powered-off` annotation and uncordons nodes
+- Opportunistic rotation on scale-up
+  - When scaling up, CBA prefers powering on the **longest-powered-off** node first (based on `cba.dev/was-powered-off` 
+    timestamp) to balance wear and validate hardware.
 - All containers run rootless
 
 

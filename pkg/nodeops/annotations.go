@@ -6,7 +6,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-const AnnotationPoweredOff = "cba.dev/was-powered-off"
+const (
+	// Rotation / power state
+	AnnotationPoweredOff = "cba.dev/was-powered-off"
+
+	// MAC addresses
+	AnnotationMACAuto   = "cba.dev/mac-address"          // default auto-discovered MAC
+	AnnotationMACManual = "cba.dev/mac-address-override" // manual override (takes precedence)
+)
 
 // PoweredOffSince returns the timestamp when the node was marked powered-off,
 // if present and parseable. If the annotation exists but isn't parseable,

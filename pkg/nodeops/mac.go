@@ -6,13 +6,11 @@ type NodeAnnotationConfig struct {
 	MAC string
 }
 
-const DefaultMACAnnotation = "cba.dev/mac-address"
-
 // GetMACAddressFromNode returns the MAC address from a node's annotations.
 func GetMACAddressFromNode(n v1.Node, keys NodeAnnotationConfig) string {
 	key := keys.MAC
 	if key == "" {
-		key = DefaultMACAnnotation
+		key = AnnotationMACAuto
 	}
 	return n.Annotations[key]
 }
