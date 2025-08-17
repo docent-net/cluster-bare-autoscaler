@@ -3,4 +3,4 @@ name: cluster-bare-autoscaler
 description: A bare-metal Kubernetes cluster autoscaler
 type: application
 version: 0.1.0
-appVersion: 0.7.7
+appVersion: 0.8.1

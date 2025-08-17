@@ -105,6 +105,7 @@ func TestPickRotationPoweroffCandidate_LoadAvg_AllowsOrBlocksByThresholds(t *tes
 	})
 }
 
+// replace the whole TestMaybeRotate_PowersOffOne_WhenEligible with this version
 func TestMaybeRotate_PowersOffOne_WhenEligible(t *testing.T) {
 	client := corefake.NewSimpleClientset(
 		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
@@ -113,84 +114,15 @@ func TestMaybeRotate_PowersOffOne_WhenEligible(t *testing.T) {
 	)
 
 	cfg := &config.Config{
-		DryRun:              true, // still calls Shutdowner
-		MinNodes:            0,
-		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
-		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
-		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
-		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
-	}
-
-	rec := &shutdownRecorder{}
-	r := &controller.Reconciler{Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: rec}
-	r.MaybeRotate(context.Background())
-
-	if len(rec.calls) != 1 {
-		t.Fatalf("expected exactly one Shutdown call, got %v", rec.calls)
-	}
-}
-
-func TestMaybeRotate_LoadAvg_GatesShutdown(t *testing.T) {
-	client := corefake.NewSimpleClientset(
-		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
-		managedNode("n1", true),
-		managedNode("n2", true),
-		managedNode("n3", true),
-	)
-
-	cfg := &config.Config{
-		DryRun:          true,
-		MinNodes:        0,
-		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
-		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
-		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
-		LoadAverageStrategy: config.LoadAverageStrategyConfig{
-			Enabled:            true,
-			NodeThreshold:      0.5,
-			ScaleDownThreshold: 0.6,
+		DryRun:   false, // real power-on path (clears annotation & uncordons)
+		MinNodes: 0,
+		NodeLabels: config.NodeLabelConfig{
+			Managed:  "cba.dev/is-managed",
+			Disabled: "cba.dev/disabled",
 		},
-	}
-
-	t.Run("allowed when low", func(t *testing.T) {
-		node, cluster := 0.2, 0.3
-		rec := &shutdownRecorder{}
-		r := &controller.Reconciler{
-			Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: rec,
-			DryRunNodeLoad: &node, DryRunClusterLoadDown: &cluster,
-		}
-		r.MaybeRotate(context.Background())
-		if len(rec.calls) != 1 {
-			t.Fatalf("expected a Shutdown when loads are low, got %v", rec.calls)
-		}
-	})
-
-	t.Run("blocked when high", func(t *testing.T) {
-		node, cluster := 0.9, 0.9
-		rec := &shutdownRecorder{}
-		r := &controller.Reconciler{
-			Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: rec,
-			DryRunNodeLoad: &node, DryRunClusterLoadDown: &cluster,
-		}
-		r.MaybeRotate(context.Background())
-		if len(rec.calls) != 0 {
-			t.Fatalf("expected no Shutdown when loads are high, got %v", rec.calls)
-		}
-	})
-}
-
-func TestMaybeRotate_RealRun_AppliesAnnotationAndCordon(t *testing.T) {
-	client := corefake.NewSimpleClientset(
-		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
-		managedNode("n1", true),
-		managedNode("n2", true),
-		managedNode("n3", true),
-	)
-
-	cfg := &config.Config{
-		DryRun:              false, // real path
-		MinNodes:            0,
-		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
-		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		NodeAnnotations: config.NodeAnnotationConfig{
+			MAC: nodeops.AnnotationMACAuto,
+		},
 		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
 		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
 	}
@@ -204,27 +136,155 @@ func TestMaybeRotate_RealRun_AppliesAnnotationAndCordon(t *testing.T) {
 		Shutdowner: rec,
 		PowerOner:  mockPower,
 	}
+
+	// First rotation loop: should only power on the overdue node, no shutdown yet.
 	r.MaybeRotate(context.Background())
 
-	if len(rec.calls) != 1 {
-		t.Fatalf("expected exactly one Shutdown call, got %v", rec.calls)
+	if len(rec.calls) != 0 {
+		t.Fatalf("no shutdown should occur in the same loop as power-on, got %v", rec.calls)
 	}
-
-	// find the annotated+cordoned node
-	nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-	require.NoError(t, err)
-	var annotated []string
-	for i := range nodes.Items {
-		n := &nodes.Items[i]
-		if n.Spec.Unschedulable && n.Annotations[nodeops.AnnotationPoweredOff] != "" {
-			annotated = append(annotated, n.Name)
+	// Verify we powered on the overdue node.
+	found := false
+	for _, n := range mockPower.PoweredOn {
+		if n == "off-old" {
+			found = true
+			break
 		}
 	}
-	if len(annotated) != 1 {
-		t.Fatalf("expected exactly one node to be cordoned+annotated, got %v", annotated)
+	if !found {
+		t.Fatalf("expected power-on of 'off-old', got %v", mockPower.PoweredOn)
 	}
-	if annotated[0] != rec.calls[0] {
-		t.Fatalf("annotation/cordon mismatch: annotated=%v shutdown=%v", annotated[0], rec.calls[0])
+}
+
+func TestMaybeRotate_LoadAvg_GatesShutdown(t *testing.T) {
+	// Now: when loads are LOW we only power on (no shutdown in same loop).
+	// When HIGH, we do nothing.
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+		managedNode("n3", true),
+	)
+
+	cfg := &config.Config{
+		DryRun:          false, // real power-on path
+		MinNodes:        0,
+		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			Enabled:            true,
+			NodeThreshold:      0.5,
+			ScaleDownThreshold: 0.6,
+		},
+	}
+
+	t.Run("allowed_when_low", func(t *testing.T) {
+		node, cluster := 0.2, 0.3
+		sh := &shutdownRecorder{}
+		power := &mockPowerOnController{}
+		r := &controller.Reconciler{
+			Cfg:                   cfg,
+			Client:                client,
+			State:                 nodeops.NewNodeStateTracker(),
+			Shutdowner:            sh,
+			PowerOner:             power,
+			DryRunNodeLoad:        &node,
+			DryRunClusterLoadDown: &cluster,
+		}
+
+		r.MaybeRotate(context.Background())
+
+		if len(sh.calls) != 0 {
+			t.Fatalf("no shutdown should occur in same loop, got %v", sh.calls)
+		}
+		if got := power.PoweredOn; len(got) != 1 || got[0] != "off-old" {
+			t.Fatalf("expected power-on of off-old, got %v", got)
+		}
+	})
+
+	t.Run("blocked_when_high", func(t *testing.T) {
+		node, cluster := 0.9, 0.9
+		sh := &shutdownRecorder{}
+		power := &mockPowerOnController{}
+		r := &controller.Reconciler{
+			Cfg:                   cfg,
+			Client:                client,
+			State:                 nodeops.NewNodeStateTracker(),
+			Shutdowner:            sh,
+			PowerOner:             power,
+			DryRunNodeLoad:        &node,
+			DryRunClusterLoadDown: &cluster,
+		}
+
+		r.MaybeRotate(context.Background())
+
+		if len(sh.calls) != 0 {
+			t.Fatalf("expected no shutdown, got %v", sh.calls)
+		}
+		if len(power.PoweredOn) != 0 {
+			t.Fatalf("expected no power-on when loads are high, got %v", power.PoweredOn)
+		}
+	})
+}
+
+func TestMaybeRotate_RealRun_AppliesAnnotationAndCordon(t *testing.T) {
+	// Now: first loop powers on overdue node and clears annotation; no shutdown yet.
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+		managedNode("n3", true),
+	)
+
+	cfg := &config.Config{
+		DryRun:              false, // real power-on path
+		MinNodes:            0,
+		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
+	}
+
+	sh := &shutdownRecorder{}
+	power := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: sh,
+		PowerOner:  power,
+	}
+
+	r.MaybeRotate(context.Background())
+
+	if len(sh.calls) != 0 {
+		t.Fatalf("no shutdown should occur in same loop, got %v", sh.calls)
+	}
+	if got := power.PoweredOn; len(got) != 1 || got[0] != "off-old" {
+		t.Fatalf("expected power-on of off-old, got %v", got)
+	}
+
+	// Check: annotation cleared & node uncordoned by power-on path.
+	nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	var offOld *v1.Node
+	for i := range nodes.Items {
+		if nodes.Items[i].Name == "off-old" {
+			offOld = &nodes.Items[i]
+			break
+		}
+	}
+	if offOld == nil {
+		t.Fatal("off-old not found")
+	}
+	if offOld.Spec.Unschedulable {
+		t.Fatalf("off-old should be uncordoned after power-on")
+	}
+	if val := offOld.Annotations[nodeops.AnnotationPoweredOff]; val != "" {
+		t.Fatalf("powered-off annotation should be cleared, still: %q", val)
 	}
 }
 
@@ -253,8 +313,8 @@ func TestMaybeRotate_SkipsIgnoredAndDisabledCandidates(t *testing.T) {
 	)
 
 	cfg := &config.Config{
-		DryRun:              true,
-		MinNodes:            1, // two eligibles (n1,n2) -> can retire exactly one
+		DryRun:              false,
+		MinNodes:            1, // enough capacity to rotate
 		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: disabledKey},
 		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
 		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
@@ -262,16 +322,23 @@ func TestMaybeRotate_SkipsIgnoredAndDisabledCandidates(t *testing.T) {
 		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
 	}
 
-	rec := &shutdownRecorder{}
-	r := &controller.Reconciler{Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: rec}
+	sh := &shutdownRecorder{}
+	power := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: sh,
+		PowerOner:  power,
+	}
+
 	r.MaybeRotate(context.Background())
 
-	if len(rec.calls) != 1 {
-		t.Fatalf("expected exactly one Shutdown call, got %v", rec.calls)
+	if len(sh.calls) != 0 {
+		t.Fatalf("no shutdown should occur in same loop, got %v", sh.calls)
 	}
-	got := rec.calls[0]
-	if got == "nD" || got == "nI" {
-		t.Fatalf("disabled/ignored node must not be chosen; got %q", got)
+	if got := power.PoweredOn; len(got) != 1 || got[0] != "off-old" {
+		t.Fatalf("expected power-on of off-old, got %v", got)
 	}
 }
 
@@ -357,4 +424,191 @@ func managedNode(name string, ready bool) *v1.Node {
 		{Type: v1.NodeReady, Status: status},
 	}
 	return n
+}
+
+func TestMaybeRotate_PowersOnOnly_FirstLoop(t *testing.T) {
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+	)
+
+	cfg := &config.Config{
+		DryRun:              false, // real power-on call
+		MinNodes:            0,
+		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
+	}
+
+	rec := &shutdownRecorder{}
+	mockPower := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: rec,
+		PowerOner:  mockPower,
+	}
+	r.MaybeRotate(context.Background())
+
+	require.Empty(t, rec.calls, "no shutdown should occur in the same loop as power-on")
+	require.ElementsMatch(t, []string{"off-old"}, mockPower.PoweredOn, "overdue node should be powered on")
+}
+
+func TestMaybeRotate_LoadAvg_GatesPowerOn(t *testing.T) {
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+		managedNode("n3", true),
+	)
+
+	baseCfg := &config.Config{
+		DryRun:          false, // real power-on call
+		MinNodes:        0,
+		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			Enabled:            true,
+			NodeThreshold:      0.5,
+			ScaleDownThreshold: 0.6,
+			// ClusterEval not critical here; default "average" is fine
+		},
+	}
+
+	t.Run("allowed when low", func(t *testing.T) {
+		node, cluster := 0.2, 0.3
+		rec := &shutdownRecorder{}
+		mockPower := &mockPowerOnController{}
+		r := &controller.Reconciler{
+			Cfg:                   baseCfg,
+			Client:                client,
+			State:                 nodeops.NewNodeStateTracker(),
+			Shutdowner:            rec,
+			PowerOner:             mockPower,
+			DryRunNodeLoad:        &node,
+			DryRunClusterLoadDown: &cluster,
+		}
+		r.MaybeRotate(context.Background())
+		require.Empty(t, rec.calls, "no shutdown in same loop")
+		require.ElementsMatch(t, []string{"off-old"}, mockPower.PoweredOn, "power-on should happen when loads are below thresholds")
+	})
+
+	t.Run("blocked when high", func(t *testing.T) {
+		node, cluster := 0.9, 0.9
+		rec := &shutdownRecorder{}
+		mockPower := &mockPowerOnController{}
+		r := &controller.Reconciler{
+			Cfg:                   baseCfg,
+			Client:                client,
+			State:                 nodeops.NewNodeStateTracker(),
+			Shutdowner:            rec,
+			PowerOner:             mockPower,
+			DryRunNodeLoad:        &node,
+			DryRunClusterLoadDown: &cluster,
+		}
+		r.MaybeRotate(context.Background())
+		require.Empty(t, rec.calls, "no shutdown")
+		require.Empty(t, mockPower.PoweredOn, "no power-on when loads are above thresholds")
+	})
+}
+
+func TestMaybeRotate_RealRun_PowersOnAndClearsAnnotation(t *testing.T) {
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+		managedNode("n3", true),
+	)
+
+	cfg := &config.Config{
+		DryRun:              false, // real path
+		MinNodes:            0,
+		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
+	}
+
+	rec := &shutdownRecorder{}
+	mockPower := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: rec,
+		PowerOner:  mockPower,
+	}
+
+	r.MaybeRotate(context.Background())
+
+	require.Empty(t, rec.calls, "no shutdown in the same loop")
+	require.ElementsMatch(t, []string{"off-old"}, mockPower.PoweredOn)
+
+	// Verify the powered-on node is uncordoned and its powered-off annotation cleared.
+	nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	var offOld *v1.Node
+	for i := range nodes.Items {
+		if nodes.Items[i].Name == "off-old" {
+			offOld = &nodes.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, offOld, "off-old must exist")
+	require.False(t, offOld.Spec.Unschedulable, "off-old should be uncordoned after power-on")
+	require.Empty(t, offOld.Annotations[nodeops.AnnotationPoweredOff], "powered-off annotation should be cleared after power-on")
+}
+
+func TestMaybeRotate_SkipsIgnoredAndDisabled_PowerOnOnly(t *testing.T) {
+	disabledKey := "cba.dev/disabled"
+	ignoreKey := "ignore.me"
+
+	overdue := poweredOffSince(managedNode("off-old", false), time.Now().Add(-3*time.Hour))
+	nD := managedNode("nD", true)
+	if nD.Labels == nil {
+		nD.Labels = map[string]string{}
+	}
+	nD.Labels[disabledKey] = "true"
+	nI := managedNode("nI", true)
+	if nI.Labels == nil {
+		nI.Labels = map[string]string{}
+	}
+	nI.Labels[ignoreKey] = "true"
+
+	client := corefake.NewSimpleClientset(
+		overdue,
+		managedNode("n1", true),
+		managedNode("n2", true),
+		nD,
+		nI,
+	)
+
+	cfg := &config.Config{
+		DryRun:              false,
+		MinNodes:            1, // two eligibles (n1,n2) -> rotation allowed
+		NodeLabels:          config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: disabledKey},
+		NodeAnnotations:     config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:            config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		IgnoreLabels:        map[string]string{ignoreKey: "true"},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{Enabled: false},
+	}
+
+	rec := &shutdownRecorder{}
+	mockPower := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg:        cfg,
+		Client:     client,
+		State:      nodeops.NewNodeStateTracker(),
+		Shutdowner: rec,
+		PowerOner:  mockPower,
+	}
+
+	r.MaybeRotate(context.Background())
+
+	require.Empty(t, rec.calls, "no shutdown in same loop")
+	require.ElementsMatch(t, []string{"off-old"}, mockPower.PoweredOn, "only the overdue node should be powered on")
 }

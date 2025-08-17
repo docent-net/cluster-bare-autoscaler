@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: docent/cluster-bare-autoscaler
-  tag: "0.7.9"
+  tag: "0.8.1"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

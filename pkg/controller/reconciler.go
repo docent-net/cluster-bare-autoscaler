@@ -466,6 +466,7 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 	if r.Cfg == nil || !r.Cfg.Rotation.Enabled || r.Cfg.Rotation.MaxPoweredOffDuration <= 0 {
 		return
 	}
+	now := time.Now().UTC()
 
 	// 1) discover the oldest overdue powered-off node
 	managed, err := nodeops.ListManagedNodes(ctx, r.Client, nodeops.ManagedNodeFilter{
@@ -480,7 +481,6 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 		return
 	}
 
-	now := time.Now().UTC()
 	var (
 		overdue *v1.Node
 		since   time.Time
@@ -521,8 +521,8 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 		return
 	}
 	eligible := r.filterEligibleNodes(allNodes.Items)
-	if len(eligible) <= r.Cfg.MinNodes {
-		slog.Info("rotation: skip — eligible nodes at/below minNodes",
+	if len(eligible)+1 <= r.Cfg.MinNodes {
+		slog.Info("rotation: skip - eligible nodes+1  at/below minNodes",
 			"eligible", len(eligible), "minNodes", r.Cfg.MinNodes)
 		return
 	}
@@ -551,54 +551,7 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 	r.State.ClearPoweredOff(overdue.Name)
 	metrics.PoweredOffNodes.WithLabelValues(overdue.Name).Set(0)
 
-	// 5) re-evaluate candidates (freshly booted node will be excluded by boot cooldown)
-	allAfter, err := r.listAllNodes(ctx)
-	if err != nil {
-		slog.Warn("rotation: failed to list nodes post power-on", "err", err)
-		return
-	}
-	eligible = r.filterEligibleNodes(allAfter.Items)
-	if len(eligible) <= r.Cfg.MinNodes {
-		slog.Info("rotation: no longer safe to retire any node after power-on",
-			"eligible", len(eligible), "minNodes", r.Cfg.MinNodes)
-		return
-	}
-	cand = r.PickRotationPoweroffCandidate(ctx, eligible)
-	if cand == nil {
-		slog.Info("rotation: no suitable power-off candidate after power-on; leaving extra node online")
-		return
-	}
-
-	slog.Info("rotation: retiring active node", "rotatedIn", overdue.Name, "rotatedOut", cand.Name)
-
-	if err := r.CordonAndDrain(ctx, cand); err != nil {
-		slog.Warn("rotation: drain failed; keeping both nodes online", "node", cand.Name, "err", err)
-		_ = nodeops.ClearPoweredOffAnnotation(ctx, r.Client, cand.Name) // best-effort cleanup
-		return
-	}
-
-	if err := r.AnnotatePoweredOffNode(ctx, cand); err != nil {
-		slog.Warn("rotation: failed to annotate powered-off node", "node", cand.Name, "err", err)
-	}
-
-	metrics.ShutdownAttempts.Inc()
-	if err := r.Shutdowner.Shutdown(ctx, cand.Name); err != nil {
-		slog.Error("rotation: shutdown failed", "node", cand.Name, "err", err)
-		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, cand.Name); err != nil {
-			slog.Warn("rotation: failed to clear annotation after shutdown failure", "node", cand.Name, "err", err)
-		}
-		return
-	}
-
-	slog.Info("rotation: shutdown initiated", "node", cand.Name)
-	metrics.ShutdownSuccesses.Inc()
-	metrics.PoweredOffNodes.WithLabelValues(cand.Name).Set(1)
-	r.State.MarkGlobalShutdown()
-
-	if !r.Cfg.DryRun {
-		r.State.MarkShutdown(cand.Name)
-		r.State.MarkPoweredOff(cand.Name)
-	}
+	slog.Info("MaybeRotate: powered on overdue node; will consider shutdown after readiness and cooldown")
 }
 
 // PickRotationPoweroffCandidate applies optional LoadAverage checks to find a safe node to power off.
