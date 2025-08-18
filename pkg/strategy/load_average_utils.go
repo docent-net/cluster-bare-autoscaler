@@ -223,7 +223,7 @@ func (u *ClusterLoadUtils) GetClusterAggregateLoad(
 	}
 
 	for node, val := range nodeLoads {
-		slog.Debug("Cluster load sample", "node", node, "normalizedLoad", val)
+		slog.Info("Cluster load sample", "node", node, "normalizedLoad", val)
 	}
 
 	return EvaluateAggregate(loads, mode), nil
