@@ -1,9 +1,9 @@
-name: Create Release on Tag
+name: Create Draft Release on Tag
 
 on:
   push:
     tags:
-      - '*'  # Trigger on all tag pushes
+      - 'v*'  # Trigger only on version-like tags
 
 permissions:
   contents: write
@@ -12,17 +12,35 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Generate changelog
         id: changelog
+        shell: bash
         run: |
-          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
-          git log $(git describe --tags --abbrev=0 HEAD~)..HEAD --pretty=format:"- %s (%an)" >> $GITHUB_ENV
-          echo "" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # Find previous tag; if none, use repo's initial commit
+          prev_tag=$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)
+          if [[ -z "$prev_tag" ]]; then
+            range_start=$(git rev-list --max-parents=0 HEAD | tail -n1)
+          else
+            range_start="$prev_tag"
+          fi
 
-      - name: Create Release
+          {
+            echo 'CHANGELOG<<EOF'
+            git log "${range_start}..${GITHUB_SHA}" --pretty=format:'- %s (%an)'
+            echo
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          body: ${{ env.CHANGELOG }}
+          draft: true                               # <- stays draft (no email) until published
+          tag_name: ${{ github.ref_name }}          # vX.Y.Z
+          name: ${{ github.ref_name }}              # release title
+          body: ${{ env.CHANGELOG }}                # or set generate_release_notes: true
+          # generate_release_notes: true
