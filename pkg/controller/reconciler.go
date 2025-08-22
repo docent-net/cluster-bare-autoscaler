@@ -102,7 +102,7 @@ func buildScaleDownStrategy(cfg *config.Config, client kubernetes.Interface, met
 			ClusterWideThreshold:      cfg.LoadAverageStrategy.ScaleDownThreshold,
 			DryRunNodeLoadOverride:    r.DryRunNodeLoad,
 			DryRunClusterLoadOverride: r.DryRunClusterLoadDown,
-			IgnoreLabels:              cfg.IgnoreLabels,
+			IgnoreLabels:              BuildAggregateExclusions(cfg),
 			ClusterEvalMode:           strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 		})
 	}
@@ -140,7 +140,7 @@ func buildScaleUpStrategy(cfg *config.Config, r *Reconciler) strategy.ScaleUpStr
 			ClusterEvalMode:      strategy.ParseClusterEvalMode(cfg.LoadAverageStrategy.ClusterEval),
 			ClusterWideThreshold: cfg.LoadAverageStrategy.ScaleUpThreshold,
 			DryRunOverride:       r.DryRunClusterLoadUp,
-			IgnoreLabels:         map[string]string{cfg.NodeLabels.Disabled: "true"}, // changed
+			IgnoreLabels:         BuildAggregateExclusions(cfg),
 			ShutdownCandidates:   r.shutdownNodeNames,
 		})
 	}
@@ -641,7 +641,7 @@ func (r *Reconciler) PickRotationPoweroffCandidate(ctx context.Context, eligible
 		// 2) Cluster aggregate load check (exclude the candidate; exclude only disabled nodes from load math).
 		agg, err := utils.GetClusterAggregateLoad(
 			ctx,
-			map[string]string{r.Cfg.NodeLabels.Disabled: "true"}, // exclude disabled from aggregate
+			BuildAggregateExclusions(r.Cfg),
 			cand.Name,               // exclude this candidate
 			r.DryRunClusterLoadDown, // optional override for tests
 			evalMode,
@@ -670,4 +670,17 @@ func (r *Reconciler) PickRotationPoweroffCandidate(ctx context.Context, eligible
 
 	// None passed.
 	return nil
+}
+
+// BuildAggregateExclusions returns the label set excluded from cluster-wide load math:
+// union of disabled-label and loadAverageStrategy.excludeFromAggregateLabels.
+func BuildAggregateExclusions(cfg *config.Config) map[string]string {
+	ex := make(map[string]string, len(cfg.LoadAverageStrategy.ExcludeFromAggregateLabels)+1)
+	if cfg.NodeLabels.Disabled != "" {
+		ex[cfg.NodeLabels.Disabled] = "true"
+	}
+	for k, v := range cfg.LoadAverageStrategy.ExcludeFromAggregateLabels {
+		ex[k] = v
+	}
+	return ex
 }

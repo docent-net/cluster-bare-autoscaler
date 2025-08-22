@@ -68,11 +68,14 @@ func (l *LoadAverageScaleDown) getNormalizedLoadForNode(ctx context.Context, nod
 
 func (l *LoadAverageScaleDown) getClusterAggregateLoad(ctx context.Context, excludeNode string) (float64, error) {
 	utils := NewClusterLoadUtils(l.Client, l.Namespace, l.PodLabel, l.HTTPPort, l.HTTPTimeout)
-	return utils.GetClusterAggregateLoad(
-		ctx,
-		map[string]string{l.Cfg.NodeLabels.Disabled: "true"},
-		excludeNode,
-		l.DryRunClusterLoadOverride,
-		l.ClusterEvalMode,
-	)
+
+	exclude := map[string]string{}
+	if l.Cfg.NodeLabels.Disabled != "" {
+		exclude[l.Cfg.NodeLabels.Disabled] = "true"
+	}
+	for k, v := range l.Cfg.LoadAverageStrategy.ExcludeFromAggregateLabels {
+		exclude[k] = v
+	}
+
+	return utils.GetClusterAggregateLoad(ctx, exclude, excludeNode, l.DryRunClusterLoadOverride, l.ClusterEvalMode)
 }

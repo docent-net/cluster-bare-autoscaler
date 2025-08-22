@@ -95,8 +95,16 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 **Labels**
 
 - `cba.dev/is-managed: "true"` — marks a node as managed by CBA (membership).
-- `cba.dev/disabled: "true"` — **hard opt-out**: node is excluded from all operations **and** from cluster-wide load calculations.
-- `ignoreLabels` (configured in `config.yaml`) — **soft ignore**: nodes matching these presence/value rules are not touched by CBA operations, but **do** count toward cluster-wide load.
+- `cba.dev/disabled: "true"` — **hard opt-out**: node is excluded from **all actions** and from **cluster-wide load math**.
+- `ignoreLabels` (in `config.yaml`) — **soft ignore**: nodes matching these presence/value rules are **not acted upon** (no scale/rotate), but **do** count toward cluster-wide load.
+- `loadAverageStrategy.excludeFromAggregateLabels` (in `config.yaml`) — **math-only exclude**: nodes matching these labels are **not counted** in cluster-wide load, but can still be acted upon unless also ignored/disabled.
+    - **Recommended default** (set in your config): exclude control-plane/master from aggregate load:
+      ```yaml
+      loadAverageStrategy:
+        excludeFromAggregateLabels:
+          node-role.kubernetes.io/control-plane: ""
+          node-role.kubernetes.io/master: ""
+      ```
 
 **Annotations**
 
@@ -112,19 +120,22 @@ It is especially suited for **self-managed data centers**, **homelabs**, or **cl
 
 ### Rotation (wear leveling) behavior
 
-- Scale-up preference: when powering on, CBA orders candidates by longest-powered-off first (from the `cba.dev/was-powered-off` timestamp).
-- Maintenance rotation (runs only if no scale up/down happened in the loop):
-    1) Find the oldest managed node marked powered-off whose off-age ≥ `rotation.maxPoweredOffDuration`
-        - respects `rotation.exemptLabel` and `ignoreLabels`
-    2) Ensure at least one eligible active node can be retired (respects `minNodes`, cooldowns, `disabled`, and `ignoreLabels`)
-    3) If LoadAverage strategy is enabled, enforce the same gates as scale-down:
-        - candidate node normalized load `< nodeThreshold`
-        - cluster aggregate load (excluding the candidate) `< scaleDownThreshold`
-    4) Power on the overdue node first (waits for Ready; clears `was-powered-off`; uncordons)
-    5) Re-evaluate eligibles (newly booted node is suppressed by boot-cooldown) and cordon/drain + shut down exactly one candidate
-- No sleeps/jitter; pacing is governed by the global cooldown.
-- If power-on fails, rotation aborts without shutting anything down.
+- **Scale-up preference:** when powering on, CBA orders candidates by **longest-powered-off first** (from `cba.dev/was-powered-off`).
 
+- **Maintenance rotation (two-phase; runs only if no scale up/down happened in the loop):**
+    1) Find the **oldest** managed node marked powered-off whose off-age ≥ `rotation.maxPoweredOffDuration`
+        - respects `rotation.exemptLabel` and `ignoreLabels`
+    2) **Pre-checks before booting:**
+        - capacity guard: `eligible + 1 > minNodes`
+        - if **LoadAverage** is enabled, ensure there exists a tentative retire candidate that would pass the same gates as scale-down:
+            - candidate node normalized load `< nodeThreshold`
+            - cluster aggregate load (computed with `loadAverageStrategy.excludeFromAggregateLabels` and **excluding the candidate**) `< scaleDownThreshold`
+    3) **Power on** the overdue node and **return** (no same-loop shutdown). Readiness and stabilization are enforced by:
+        - **global cooldown** (op-to-op pacing), and
+        - **bootCooldown** (prevents the freshly booted node from being a shutdown candidate)
+    4) On later loops—once the node is **Ready** and cooldowns have elapsed—normal logic may retire **exactly one** eligible active node.
+
+- If power-on fails, rotation **aborts**; no shutdown is attempted.
 
 ---
 

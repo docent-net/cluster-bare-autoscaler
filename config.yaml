@@ -66,6 +66,11 @@ loadAverageStrategy:
   port: 9100                        # Port on which the sysmetrics pods expose `/load`
   timeoutSeconds: 3                # HTTP timeout for querying node metrics
   clusterEval: p75                 # Cluster-wide aggregation mode: average, median, p90, p75
+  # exclude these labels from cluster-wide aggregate load math.
+  # Presence-only match when value is empty.
+  excludeFromAggregateLabels:
+    node-role.kubernetes.io/control-plane: ""
+    node-role.kubernetes.io/master: ""
 
 # ──────────────────────────────────────────────
 # Shutdown Management

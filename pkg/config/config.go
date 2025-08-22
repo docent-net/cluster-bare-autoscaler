@@ -62,15 +62,16 @@ type RotationConfig struct {
 }
 
 type LoadAverageStrategyConfig struct {
-	Enabled            bool    `yaml:"enabled"`
-	NodeThreshold      float64 `yaml:"nodeThreshold"`
-	ScaleDownThreshold float64 `yaml:"scaleDownThreshold"`
-	ScaleUpThreshold   float64 `yaml:"scaleUpThreshold"`
-	PodLabel           string  `yaml:"podLabel"`
-	Namespace          string  `yaml:"namespace"`
-	Port               int     `yaml:"port"`
-	TimeoutSeconds     int     `yaml:"timeoutSeconds"`
-	ClusterEval        string  `yaml:"clusterEval,omitempty"` // "average", "median", "p90", "p75"
+	Enabled                    bool              `yaml:"enabled"`
+	NodeThreshold              float64           `yaml:"nodeThreshold"`
+	ScaleDownThreshold         float64           `yaml:"scaleDownThreshold"`
+	ScaleUpThreshold           float64           `yaml:"scaleUpThreshold"`
+	PodLabel                   string            `yaml:"podLabel"`
+	Namespace                  string            `yaml:"namespace"`
+	Port                       int               `yaml:"port"`
+	TimeoutSeconds             int               `yaml:"timeoutSeconds"`
+	ClusterEval                string            `yaml:"clusterEval,omitempty"` // "average", "median", "p90", "p75"
+	ExcludeFromAggregateLabels map[string]string `yaml:"excludeFromAggregateLabels,omitempty"`
 }
 
 type ShutdownManagerConfig struct {

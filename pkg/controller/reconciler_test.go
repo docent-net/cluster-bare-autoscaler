@@ -16,6 +16,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	corefake "k8s.io/client-go/kubernetes/fake"
 )
 
 // Helpers
@@ -1078,4 +1079,149 @@ func TestReconcile_RecoversUnexpectedlyBootedNodes(t *testing.T) {
 
 func TestNewReconciler_StrategyWiring_WithLoadAverage(t *testing.T) {
 	t.Skip("TODO: Set LoadAverageStrategy.Enabled=true in config. Build reconciler with NewReconciler() and verify scale-down chain includes ResourceAware + LoadAverage, and scale-up chain includes MinNodeCount + LoadAverage with dry-run overrides.")
+}
+
+func Test_buildAggregateExclusions_MergesDisabledAndUserMap(t *testing.T) {
+	cfg := &config.Config{
+		NodeLabels: config.NodeLabelConfig{
+			Disabled: "cba.dev/disabled",
+		},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			ExcludeFromAggregateLabels: map[string]string{
+				"node-role.kubernetes.io/control-plane": "",
+				"kubernetes.io/hostname":                "cp-1",
+			},
+		},
+	}
+
+	got := controller.BuildAggregateExclusions(cfg)
+
+	// disabled is always included with value "true"
+	if v, ok := got["cba.dev/disabled"]; !ok || v != "true" {
+		t.Fatalf("expected disabled label with value 'true', got %q (present=%v)", v, ok)
+	}
+	// presence-only key preserved (empty string value)
+	if v, ok := got["node-role.kubernetes.io/control-plane"]; !ok || v != "" {
+		t.Fatalf("expected presence-only control-plane key with empty value, got %q (present=%v)", v, ok)
+	}
+	// exact-value pair preserved
+	if v := got["kubernetes.io/hostname"]; v != "cp-1" {
+		t.Fatalf("expected hostname=cp-1, got %q", v)
+	}
+}
+
+func Test_buildAggregateExclusions_NoDisabledConfigured(t *testing.T) {
+	cfg := &config.Config{
+		NodeLabels: config.NodeLabelConfig{
+			Disabled: "",
+		},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			ExcludeFromAggregateLabels: map[string]string{
+				"scheduler.alpha.kubernetes.io/critical-pod": "",
+			},
+		},
+	}
+
+	got := controller.BuildAggregateExclusions(cfg)
+
+	if _, ok := got["cba.dev/disabled"]; ok {
+		t.Fatalf("did not expect disabled key when cfg.NodeLabels.Disabled is empty")
+	}
+	if v, ok := got["scheduler.alpha.kubernetes.io/critical-pod"]; !ok || v != "" {
+		t.Fatalf("expected presence-only critical-pod label, got %q (present=%v)", v, ok)
+	}
+}
+
+func TestMaybeRotate_Skips_WhenEligiblePlusOneAtOrBelowMinNodes(t *testing.T) {
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+	)
+	cfg := &config.Config{
+		DryRun:          false,
+		MinNodes:        3, // eligible is 2; 2+1 == 3 -> skip
+		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+	}
+	sh := &shutdownRecorder{}
+	power := &mockPowerOnController{}
+	r := &controller.Reconciler{Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: sh, PowerOner: power}
+
+	r.MaybeRotate(context.Background())
+
+	if len(power.PoweredOn) != 0 {
+		t.Fatalf("expected no power-on when eligible+1 <= minNodes, got %v", power.PoweredOn)
+	}
+	if len(sh.calls) != 0 {
+		t.Fatalf("expected no shutdown, got %v", sh.calls)
+	}
+}
+
+func TestMaybeRotate_Skips_OverdueNode_WithExemptLabel(t *testing.T) {
+	overdue := poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour))
+	if overdue.Labels == nil {
+		overdue.Labels = map[string]string{}
+	}
+	overdue.Labels["cba.dev/rotation-exempt"] = "true"
+
+	client := corefake.NewSimpleClientset(
+		overdue,
+		managedNode("n1", true),
+		managedNode("n2", true),
+	)
+	cfg := &config.Config{
+		DryRun:          false,
+		MinNodes:        0,
+		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute, ExemptLabel: "cba.dev/rotation-exempt"},
+	}
+	sh := &shutdownRecorder{}
+	power := &mockPowerOnController{}
+	r := &controller.Reconciler{Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(), Shutdowner: sh, PowerOner: power}
+
+	r.MaybeRotate(context.Background())
+
+	if len(power.PoweredOn) != 0 {
+		t.Fatalf("expected no power-on when overdue is exempt, got %v", power.PoweredOn)
+	}
+}
+
+func TestMaybeRotate_Skips_WhenNoTentativeCandidateDueToLoad(t *testing.T) {
+	client := corefake.NewSimpleClientset(
+		poweredOffSince(managedNode("off-old", false), time.Now().Add(-2*time.Hour)),
+		managedNode("n1", true),
+		managedNode("n2", true),
+	)
+	cfg := &config.Config{
+		DryRun:          false,
+		MinNodes:        0,
+		NodeLabels:      config.NodeLabelConfig{Managed: "cba.dev/is-managed", Disabled: "cba.dev/disabled"},
+		NodeAnnotations: config.NodeAnnotationConfig{MAC: nodeops.AnnotationMACAuto},
+		Rotation:        config.RotationConfig{Enabled: true, MaxPoweredOffDuration: 30 * time.Minute},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			Enabled:            true,
+			NodeThreshold:      0.5,
+			ScaleDownThreshold: 0.6,
+		},
+	}
+	node, cluster := 0.9, 0.9 // too high -> PickRotationPoweroffCandidate returns nil
+	sh := &shutdownRecorder{}
+	power := &mockPowerOnController{}
+	r := &controller.Reconciler{
+		Cfg: cfg, Client: client, State: nodeops.NewNodeStateTracker(),
+		Shutdowner: sh, PowerOner: power,
+		DryRunNodeLoad: &node, DryRunClusterLoadDown: &cluster,
+	}
+
+	r.MaybeRotate(context.Background())
+
+	if len(power.PoweredOn) != 0 {
+		t.Fatalf("expected no power-on when no tentative retire candidate, got %v", power.PoweredOn)
+	}
+	if len(sh.calls) != 0 {
+		t.Fatalf("expected no shutdown, got %v", sh.calls)
+	}
 }
