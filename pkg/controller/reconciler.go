@@ -494,6 +494,8 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 	)
 	poweredOffCount := 0
 	overdueCount := 0
+	maxOffAge := time.Duration(0)
+	maxOffNode := ""
 
 	for i := range managed {
 		n := managed[i]
@@ -514,6 +516,12 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 		if t, ok := nodeops.PoweredOffSince(n); ok {
 			poweredOffCount++
 			age := now.Sub(t)
+
+			if age > maxOffAge {
+				maxOffAge = age
+				maxOffNode = n.Name
+			}
+
 			if age >= r.Cfg.Rotation.MaxPoweredOffDuration {
 				overdueCount++
 				if overdue == nil || t.Before(since) {
@@ -525,10 +533,14 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 	}
 
 	if overdue == nil {
+		timeLeft := r.Cfg.Rotation.MaxPoweredOffDuration - maxOffAge
 		slog.Info("MaybeRotate: no overdue powered-off node found",
 			"poweredOff", poweredOffCount,
 			"overdue", overdueCount,
 			"minOffAge", r.Cfg.Rotation.MaxPoweredOffDuration.String(),
+			"longestOffNode", maxOffNode,
+			"longestOffAge", maxOffAge.Round(time.Second).String(),
+			"nextRotationIn", timeLeft.Round(time.Second).String(),
 		)
 		return
 	}
