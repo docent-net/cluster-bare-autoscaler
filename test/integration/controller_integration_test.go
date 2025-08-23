@@ -431,35 +431,113 @@ func TestIntegration_BootCooldown_ProtectsFreshNodeFromShutdown(t *testing.T) {
 
 // ForcePowerOnAllNodes powers all managed nodes (TODO)
 func TestIntegration_ForcePowerOnAllNodes_PowersAllManaged(t *testing.T) {
-	t.Skip("TODO: set cfg.ForcePowerOnAllNodes=true; expect PowerOn called for all managed nodes and no shutdowns")
-	// Arrange:
-	//   - Nodes: n1 (Ready), n2 (Ready), off-old (NotReady → treated as powered-off)
-	//   - cfg := scenario.MinimalConfig()
-	//   - cfg.ForcePowerOnAllNodes = true
-	//   - cfg.Rotation.Enabled = false
-	//   - cfg.LoadAverageStrategy.Enabled = false
-	//   - pwr := &scenario.PowerOnRecorder{}, sh := &scenario.ShutdownRecorder{}
-	//   - r := scenario.NewReconciler(cfg, client, sh, pwr)
-	// Act:
-	//   - requireNoErr(t, r.Reconcile(ctx))
-	// Assert:
-	//   - pwr.PoweredOn contains ["n1","n2","off-old"] (order irrelevant)
-	//   - sh.Calls is empty
+	t.Parallel()
+	ctx := context.Background()
+
+	// Managed nodes: two Ready, one NotReady (treated as powered-off)
+	n1 := scenario.ManagedNode("n1", true)
+	n2 := scenario.ManagedNode("n2", true)
+	off := scenario.ManagedNode("off-old", false)
+
+	client := scenario.NewFakeClient(n1, n2, off)
+
+	cfg := scenario.MinimalConfig()
+	cfg.ForcePowerOnAllNodes = true
+	cfg.Rotation.Enabled = false
+	cfg.LoadAverageStrategy.Enabled = false
+
+	sh := &scenario.ShutdownRecorder{}
+	pwr := &scenario.PowerOnRecorder{}
+	r := scenario.NewReconciler(cfg, client, sh, pwr)
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// Expect power-on only for managed NotReady nodes (Ready nodes are skipped as no-op).
+	want := map[string]struct{}{"off-old": {}}
+	got := map[string]struct{}{}
+	for _, name := range pwr.PoweredOn {
+		got[name] = struct{}{}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected power-on only for NotReady managed nodes; got=%v", pwr.PoweredOn)
+	}
+	if _, ok := got["off-old"]; !ok {
+		t.Fatalf("missing power-on for node %q; calls=%v", "off-old", pwr.PoweredOn)
+	}
+	if contains(pwr.PoweredOn, "n1") || contains(pwr.PoweredOn, "n2") {
+		t.Fatalf("Ready nodes should not be force-powered on; got=%v", pwr.PoweredOn)
+	}
+
+	// No shutdowns in this path.
+	if len(sh.Calls) != 0 {
+		t.Fatalf("expected no shutdowns; got=%v", sh.Calls)
+	}
 }
 
-// LoadAverage scale-up gating (TODO)
+// LoadAverage scale-up gating
 func TestIntegration_LoadAvgScaleUp_GatesByClusterLoad(t *testing.T) {
-	t.Skip("TODO: enable LoadAverageScaleUp + use r.DryRunClusterLoadUp override; low load => deny; high load => power-on off-old")
-	// Arrange:
-	//   - Nodes: n1 (Ready), n2 (Ready), off-old (NotReady)
-	//   - cfg := scenario.MinimalConfig()
-	//   - cfg.MinNodes = 2  (so MinNodeCount alone doesn’t trigger)
-	//   - cfg.Rotation.Enabled = false
-	//   - cfg.LoadAverageStrategy.Enabled = true
-	//   - cfg.LoadAverageStrategy.ScaleUpThreshold = 0.7
-	//   - cfg.LoadAverageStrategy.ClusterEval = "average"
-	//   - r := scenario.NewReconciler(cfg, client, sh, pwr)
-	// Act & Assert (subtests):
-	//   - low := 0.3; r.DryRunClusterLoadUp = &low; Reconcile → expect NO power-on
-	//   - hi  := 0.9; r.DryRunClusterLoadUp = &hi;  Reconcile → expect power-on of "off-old"
+	t.Parallel()
+	ctx := context.Background()
+
+	// Two Ready nodes and one explicitly powered-off candidate.
+	n1 := scenario.ManagedNode("n1", true)
+	n2 := scenario.ManagedNode("n2", true)
+	now := time.Now()
+	off := scenario.PoweredOffSince(scenario.ManagedNode("off-old", false), now.Add(-1*time.Hour))
+
+	client := scenario.NewFakeClient(n1, n2, off)
+
+	// Base config
+	base := scenario.MinimalConfig()
+	base.MinNodes = 2             // MinNodeCount alone should NOT trigger scale-up
+	base.Rotation.Enabled = false // focus purely on scale-up logic
+	base.LoadAverageStrategy.Enabled = true
+	base.LoadAverageStrategy.ScaleUpThreshold = 0.7
+	base.LoadAverageStrategy.ClusterEval = "average"
+
+	t.Run("low cluster load denies scale-up", func(t *testing.T) {
+		sh := &scenario.ShutdownRecorder{}
+		pwr := &scenario.PowerOnRecorder{}
+
+		// Build reconciler with dry-run override applied BEFORE strategies are built.
+		rLow := controller.NewReconciler(
+			base,
+			client,
+			metricsfake.NewSimpleClientset(),
+			func(r *controller.Reconciler) { r.Shutdowner = sh },
+			func(r *controller.Reconciler) { r.PowerOner = pwr },
+			controller.WithDryRunClusterLoadUp(0.3),
+		)
+
+		if err := rLow.Reconcile(ctx); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		if len(pwr.PoweredOn) != 0 {
+			t.Fatalf("expected NO power-on under low cluster load, got %v", pwr.PoweredOn)
+		}
+	})
+
+	t.Run("high cluster load triggers scale-up", func(t *testing.T) {
+		sh := &scenario.ShutdownRecorder{}
+		pwr := &scenario.PowerOnRecorder{}
+
+		// Fresh reconciler with high override.
+		rHigh := controller.NewReconciler(
+			base,
+			client,
+			metricsfake.NewSimpleClientset(),
+			func(r *controller.Reconciler) { r.Shutdowner = sh },
+			func(r *controller.Reconciler) { r.PowerOner = pwr },
+			controller.WithDryRunClusterLoadUp(0.9),
+		)
+
+		if err := rHigh.Reconcile(ctx); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		if !contains(pwr.PoweredOn, "off-old") {
+			t.Fatalf("expected power-on of off-old under high cluster load, got %v", pwr.PoweredOn)
+		}
+	})
 }
