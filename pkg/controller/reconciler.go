@@ -602,9 +602,16 @@ func (r *Reconciler) MaybeRotate(ctx context.Context) {
 //
 // If aggregate is already too high with one candidate excluded, we abort early (return nil).
 func (r *Reconciler) PickRotationPoweroffCandidate(ctx context.Context, eligible []*nodeops.NodeWrapper) *nodeops.NodeWrapper {
-	// If LoadAverage strategy is disabled, keep existing selection behavior.
+	// If LoadAverage strategy is disabled, DO NOT defer to scale-down chain (it obeys minNodes).
+	// For rotation precheck we only need a tentative retiree once the newly powered-on node is up,
+	// so pick a simple candidate from 'eligible' directly.
 	if !r.Cfg.LoadAverageStrategy.Enabled {
-		return r.PickScaleDownCandidate(eligible)
+		if len(eligible) == 0 {
+			return nil
+		}
+		// Prefer a deterministic choice; first eligible is fine here.
+		// (Boot-cooled nodes are already excluded by filterEligibleNodes.)
+		return eligible[0]
 	}
 
 	// Debug: show candidate set we will evaluate under load-average gates.

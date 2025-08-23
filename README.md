@@ -193,6 +193,31 @@ make publish_image
 go run main.go --config=./config.yaml --dry-run
 ```
 
+### Integration(-ish) tests
+
+We keep unit tests next to packages, and black-box integration tests in a separate tree:
+
+```bash
+test/
+integration/
+controller_integration_test.go # scenarios across full reconcile loops
+scenario/
+scenario.go # shared fakes & builders
+```
+
+Integration tests are guarded by a build tag and don’t run by default:
+
+```bash
+```bash
+# unit tests (default)
+go test ./...
+
+# integration tests (black-box end-to-end-ish)
+go test -tags=integration ./test/integration -v
+```
+
+They use client-go fakes + small mocks for power/shutdown to simulate multi-node clusters.
+
 ---
 
 ## Roadmap & TODO

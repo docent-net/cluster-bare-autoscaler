@@ -2,17 +2,37 @@
 IMAGE_NAME=docent/cluster-bare-autoscaler
 TAG ?= $(shell git describe --tags --always --dirty)
 PLATFORMS=linux/amd64,linux/arm64
+GO               ?= go
+PKG              ?= ./...
+INTEGRATION_PKG  ?= ./test/integration/...
+
+COVER_DIR   := coverage
+UNIT_PROFILE := $(COVER_DIR)/unit.out
+INT_PROFILE  := $(COVER_DIR)/integration.out
 
 # Binary name
 BIN_NAME=cluster-bare-autoscaler
 
 # Default: run tests
 .PHONY: all
-all: test
+all: unit
 
-.PHONY: test
-test:
-	go test ./...
+.PHONY: unit
+unit:
+	@mkdir -p $(COVER_DIR)
+	$(GO) test -race -covermode=atomic -coverprofile=$(UNIT_PROFILE) $(PKG)
+
+.PHONY: test-integration
+test-integration:
+	@mkdir -p $(COVER_DIR)
+	@if [ -d test/integration ]; then \
+	  $(GO) test -race -tags=integration -covermode=atomic -coverpkg=./... -coverprofile=$(INT_PROFILE) $(INTEGRATION_PKG); \
+	else \
+	  echo "no integration tests found under test/integration — skipping"; \
+	fi
+
+.PHONY: test-all
+test-all: fmt vet unit test-integration
 
 .PHONY: set_helm_app_version
 set_helm_app_version:
@@ -27,12 +47,20 @@ update_helm_metadata: set_helm_app_version set_helm_values_tag
 
 .PHONY: lint
 lint:
-	go vet ./...
+	$(GO) vet ./...
+
+.PHONY: fmt
+fmt:
+	$(GO) fmt ./...
+
+.PHONY: vet
+vet:
+	$(GO) vet ./...
 
 .PHONY: build_binary
 build_binary:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-	go build -ldflags="-s -w -X main.version=$(TAG)" \
+	$(GO) build -ldflags="-s -w -X main.version=$(TAG)" \
 	-o bin/$(BIN_NAME) ./main.go
 
 .PHONY: build_image
@@ -46,5 +74,6 @@ build_and_publish_image:
 
 .PHONY: clean
 clean:
-	go clean
+	$(GO) clean
 	rm -f bin/$(BIN_NAME)
+	rm -rf $(COVER_DIR)

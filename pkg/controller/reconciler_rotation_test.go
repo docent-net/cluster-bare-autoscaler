@@ -35,9 +35,10 @@ func (s *shutdownRecorder) Shutdown(_ context.Context, node string) error {
 	return nil
 }
 
-// --- PickRotationPoweroffCandidate ---
-
-func TestPickRotationPoweroffCandidate_DisabledDelegatesToPickScaleDown(t *testing.T) {
+// When LoadAverage is disabled, rotation precheck no longer defers to the scale-down chain
+// (which is minNodes-gated). It deterministically picks the FIRST eligible node as a
+// tentative retiree (actual shutdown happens in a later loop).
+func TestPickRotationPoweroffCandidate_Disabled_PicksDeterministicFirstEligible(t *testing.T) {
 	cfg := &config.Config{
 		MinNodes: 0,
 		NodeLabels: config.NodeLabelConfig{
@@ -59,12 +60,37 @@ func TestPickRotationPoweroffCandidate_DisabledDelegatesToPickScaleDown(t *testi
 		nodeops.NewNodeWrapper(managedReady("n3"), state, now, nodeops.NodeAnnotationConfig{}, cfg.IgnoreLabels),
 	}
 
-	want := r.PickScaleDownCandidate(wrappers)
 	got := r.PickRotationPoweroffCandidate(context.Background(), wrappers)
+	require.NotNil(t, got, "expected some candidate when LA is disabled")
+	require.Equal(t, "n1", got.Name, "should pick the first eligible deterministically")
+}
 
-	if want == nil || got == nil || want.Name != got.Name {
-		t.Fatalf("expected same candidate as PickScaleDownCandidate, want=%v got=%v", nn(want), nn(got))
+// Also verify the rationale for the new behavior: with LA disabled, rotation precheck
+// must still produce a candidate even if current eligible == minNodes (because the actual
+// shutdown happens AFTER boot, when eligible+1 > minNodes).
+func TestPickRotationPoweroffCandidate_Disabled_IgnoresMinNodesForPrecheck(t *testing.T) {
+	cfg := &config.Config{
+		MinNodes: 3, // equal to eligible count
+		NodeLabels: config.NodeLabelConfig{
+			Managed:  "scaling-managed-by-cba",
+			Disabled: "cba.dev/disabled",
+		},
+		LoadAverageStrategy: config.LoadAverageStrategyConfig{
+			Enabled: false,
+		},
 	}
+	r := &controller.Reconciler{Cfg: cfg}
+
+	state := nodeops.NewNodeStateTracker()
+	now := time.Now()
+	wrappers := []*nodeops.NodeWrapper{
+		nodeops.NewNodeWrapper(managedReady("n1"), state, now, nodeops.NodeAnnotationConfig{}, nil),
+		nodeops.NewNodeWrapper(managedReady("n2"), state, now, nodeops.NodeAnnotationConfig{}, nil),
+		nodeops.NewNodeWrapper(managedReady("n3"), state, now, nodeops.NodeAnnotationConfig{}, nil),
+	}
+
+	got := r.PickRotationPoweroffCandidate(context.Background(), wrappers)
+	require.NotNil(t, got, "should still return a tentative candidate even when eligible == minNodes")
 }
 
 func TestPickRotationPoweroffCandidate_LoadAvg_AllowsOrBlocksByThresholds(t *testing.T) {

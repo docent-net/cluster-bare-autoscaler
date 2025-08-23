@@ -1,35 +1,75 @@
-name: Go CI
+name: Go Tests (unit + integration)
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: ${{ matrix.kind }} tests
     runs-on: ubuntu-latest
-    name: Go 1.23.3 Tests
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [ unit, integration ]
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Go 1.23.3
-        uses: actions/setup-go@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          go-version: 1.23.3
+          fetch-depth: 0
 
-      - name: Run static analysis
-        run: go vet ./...
-
-      - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.out ./...
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}  # Required only for private repos
-          files: coverage.out
-          flags: unittests
-          name: codecov-report
+          go-version: '1.23.x'
+
+      - name: Cache go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      # ---- run tests ----
+      - name: Unit tests
+        if: matrix.kind == 'unit'
+        run: |
+          make unit
+
+      - name: Integration tests
+        if: matrix.kind == 'integration'
+        run: |
+          make test-integration
+
+      # ---- upload coverage ----
+      - name: Upload unit coverage to Codecov
+        if: matrix.kind == 'unit'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/unit.out
+          flags: unit
           fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload integration coverage to Codecov
+        if: matrix.kind == 'integration'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/integration.out
+          flags: integration
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
