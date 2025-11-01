@@ -226,6 +226,23 @@ See `TODO.md` for the current feature backlog and development roadmap.
 
 ---
 
+## Troubleshooting
+
+### CBA logs: `the server is currently unable to handle the request (get nodes.metrics.k8s.io)`
+
+**What it means:**  
+CBA tried to read live CPU and memory usage from the Kubernetes metrics API, but your cluster's `metrics.k8s.io` endpoint is registered without a working backend.
+
+**How to confirm:**
+
+```bash
+kubectl get apiservice v1beta1.metrics.k8s.io
+# STATUS: False (MissingEndpoints)
+kubectl -n kube-system get svc metrics-server
+kubectl -n kube-system get deploy metrics-server
+
+---
+
 ## License
 
 MIT
