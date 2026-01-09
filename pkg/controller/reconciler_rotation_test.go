@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"github.com/stretchr/testify/require"
+	"slices"
 	"testing"
 	"time"
 
@@ -170,13 +171,7 @@ func TestMaybeRotate_PowersOffOne_WhenEligible(t *testing.T) {
 		t.Fatalf("no shutdown should occur in the same loop as power-on, got %v", rec.calls)
 	}
 	// Verify we powered on the overdue node.
-	found := false
-	for _, n := range mockPower.PoweredOn {
-		if n == "off-old" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(mockPower.PoweredOn, "off-old")
 	if !found {
 		t.Fatalf("expected power-on of 'off-old', got %v", mockPower.PoweredOn)
 	}
