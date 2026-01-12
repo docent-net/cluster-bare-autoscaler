@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
@@ -73,9 +74,7 @@ func (l *LoadAverageScaleDown) getClusterAggregateLoad(ctx context.Context, excl
 	if l.Cfg.NodeLabels.Disabled != "" {
 		exclude[l.Cfg.NodeLabels.Disabled] = "true"
 	}
-	for k, v := range l.Cfg.LoadAverageStrategy.ExcludeFromAggregateLabels {
-		exclude[k] = v
-	}
+	maps.Copy(exclude, l.Cfg.LoadAverageStrategy.ExcludeFromAggregateLabels)
 
 	return utils.GetClusterAggregateLoad(ctx, exclude, excludeNode, l.DryRunClusterLoadOverride, l.ClusterEvalMode)
 }

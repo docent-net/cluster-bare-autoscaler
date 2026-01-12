@@ -8,6 +8,7 @@ import (
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
 	"k8s.io/client-go/util/retry"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
+	"maps"
 
 	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
@@ -375,7 +376,7 @@ func (r *Reconciler) AnnotatePoweredOffNode(ctx context.Context, node *nodeops.N
 	}
 	slog.Debug("Annotating node as powered-off", "node", node.Name)
 	timestamp := time.Now().UTC().Format(time.RFC3339)
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp))
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, nodeops.AnnotationPoweredOff, timestamp)
 	_, err := r.Client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
@@ -698,8 +699,6 @@ func BuildAggregateExclusions(cfg *config.Config) map[string]string {
 	if cfg.NodeLabels.Disabled != "" {
 		ex[cfg.NodeLabels.Disabled] = "true"
 	}
-	for k, v := range cfg.LoadAverageStrategy.ExcludeFromAggregateLabels {
-		ex[k] = v
-	}
+	maps.Copy(ex, cfg.LoadAverageStrategy.ExcludeFromAggregateLabels)
 	return ex
 }

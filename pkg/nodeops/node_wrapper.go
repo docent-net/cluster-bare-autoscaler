@@ -36,7 +36,7 @@ func (n *NodeWrapper) SetDiscoveredMAC(ctx context.Context, client kubernetes.In
 		return nil
 	}
 
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, AnnotationMACAuto, mac))
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, AnnotationMACAuto, mac)
 	_, err := client.CoreV1().Nodes().Patch(ctx, n.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		slog.Warn("Failed to patch node with discovered MAC", "node", n.Name, "err", err)

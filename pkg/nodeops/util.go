@@ -41,7 +41,7 @@ func UncordonNode(ctx context.Context, client kubernetes.Interface, nodeName str
 
 // ClearPoweredOffAnnotation removes the powered-off annotation from the node.
 func ClearPoweredOffAnnotation(ctx context.Context, client kubernetes.Interface, nodeName string) error {
-	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, AnnotationPoweredOff))
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":null}}}`, AnnotationPoweredOff)
 	_, err := client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("remove annotation: %w", err)
