@@ -3,7 +3,7 @@
 
 # Cluster Bare Autoscaler
 
-![Cluster Bare Autoscaler logo](docs/images/cba-logo.png)
+![Cluster Bare Autoscaler logo](docs/images/cba.png)
 
 **Cluster Bare Autoscaler (CBA)** automatically adjusts the size of a bare-metal Kubernetes cluster by powering nodes off or on based on real-time resource usage, while safely cordoning and draining nodes before shutdown.
 
