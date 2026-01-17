@@ -13,12 +13,12 @@ This project is similar to the official Kubernetes Cluster Autoscaler, but with 
 - Nodes are **cordoned and drained safely** before shutdown.
 
 CBA uses a **chainable strategy model** for deciding when to scale down a node. Strategies can be enabled individually or used together:
-- **Resource-aware strategy** — checks CPU and memory requests and usage.
-- **Load average strategy** — evaluates `/proc/loadavg` via a per-node metrics DaemonSet.
+- **Resource-aware strategy** - checks CPU and memory requests and usage.
+- **Load average strategy** - evaluates `/proc/loadavg` via a per-node metrics DaemonSet.
 
 It is especially suited for **self-managed data centers**, **homelabs**, or **cloud-like bare-metal environments**.
 
 For more details, see the [docs/README.md](docs/README.md)
 
 There's also a full blog series that describes the process of building CBA, 
-how decisions were made, and implementatio details are explained: [blog series](https://maciej.lasyk.info/tag/cluster-bare-autoscaler/)
+how decisions were made, and implementation details are explained: [blog series](https://maciej.lasyk.info/tag/cluster-bare-autoscaler/)
