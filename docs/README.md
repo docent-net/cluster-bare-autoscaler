@@ -1,3 +1,9 @@
+## Blog series
+
+There is a blog series explaining all details behind design, implementation
+and decission making related to the Cluster Bare Autoscaler. See it [here](https://maciej.lasyk.info/tag/cluster-bare-autoscaler/)
+or subscribe to [RSS](https://maciej.lasyk.info/tag/cluster-bare-autoscaler/rss/).
+
 ## Features
 
 - Pluggable scale-down and scale-up strategies
