@@ -19,3 +19,6 @@ CBA uses a **chainable strategy model** for deciding when to scale down a node. 
 It is especially suited for **self-managed data centers**, **homelabs**, or **cloud-like bare-metal environments**.
 
 For more details, see the [docs/README.md](docs/README.md)
+
+There's also a full blog series that describes the process of building CBA, 
+how decisions were made, and implementatio details are explained: [blog series](https://maciej.lasyk.info/tag/cluster-bare-autoscaler/)
