@@ -164,6 +164,30 @@ make build_binary
 make test
 ```
 
+### Helm chart checks (local)
+
+Requires: helm, yamllint, chart-testing (ct).
+
+```bash
+helm template ./helm | yamllint -d '{extends: default, rules: {key-duplicates: enable, indentation: disable}}' -
+helm lint --strict ./helm
+ct lint --config ct.yaml --all
+```
+
+### Helm chart checks (container)
+
+Requires: Docker or Podman.
+
+```bash
+make helm-checks
+```
+
+To force a specific runtime:
+
+```bash
+CONTAINER_RUNTIME=podman make helm-checks
+```
+
 ### Build container image (multi-arch with `ko`)
 
 ```bash

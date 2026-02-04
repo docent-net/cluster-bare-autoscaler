@@ -34,6 +34,10 @@ test-integration:
 .PHONY: test-all
 test-all: fmt vet unit test-integration
 
+.PHONY: helm-checks
+helm-checks:
+	./tools/helm-checks/run.sh
+
 .PHONY: set_helm_app_version
 set_helm_app_version:
 	sed -i 's/appVersion: .*/appVersion: $(TAG)/' helm/Chart.yaml
